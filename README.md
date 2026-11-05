@@ -36,7 +36,9 @@ Copy-Item .env.example .env
 
 Then open `http://localhost:5173`. The API is available at `http://localhost:8000/docs`.
 
-Demo accounts are created only in the local synthetic database:
+These synthetic-only demo accounts are seeded in local development and the
+explicitly provisioned Supabase demonstration dataset. They must not be reused
+outside this hackathon MVP:
 
 | Role | Email | Password |
 | --- | --- | --- |
