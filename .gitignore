@@ -33,6 +33,8 @@ CPG Management of Type 2 Diabetes Mellitus (6th Edition) 20210413.pdf
 *.key
 .vercel/
 .openai/
+!frontend/.openai/
+!frontend/.openai/hosting.json
 supabase/.temp/
 backend/app/chain/contract_metadata.json
 
