@@ -38,7 +38,9 @@ class FhirR4JsonResponse(JSONResponse):
 
 class LoginPayload(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8)
+    # The synthetic hackathon accounts deliberately use the documented five-
+    # character demo credential. Hosted deployments must replace these accounts.
+    password: str = Field(min_length=5)
 
 
 class AlertAction(BaseModel):

@@ -7,10 +7,19 @@ from sqlalchemy import select
 from .chain import build_source_batch
 from .db import SessionLocal, initialise_database
 from .models import AuditEvent, Condition, Observation, Organization, Patient, ResearchGrant, SourceBatch, User
-from .security import hash_password
+from .security import hash_password, verify_password
 from .terminology import LOINC_SYSTEM, LOINC_VERSION, SNOMED_SYSTEM, TerminologyError, map_measurement
 
-PASSWORD = "SentinelDemo!2026"
+PASSWORD = "12345"
+DEMO_EMAILS = (
+    "admin@sentinel.demo",
+    "caio@sentinel.demo",
+    "clinician.aster@sentinel.demo",
+    "clinician.beryl@sentinel.demo",
+    "clinician.cobalt@sentinel.demo",
+    "researcher.approved@sentinel.demo",
+    "researcher.denied@sentinel.demo",
+)
 ANCHOR = datetime(2026, 10, 31, 8, 0, tzinfo=timezone.utc)
 
 
@@ -18,6 +27,14 @@ def seed() -> None:
     initialise_database()
     with SessionLocal() as db:
         if db.scalar(select(User.id).limit(1)):
+            demo_users = list(db.scalars(select(User).where(User.email.in_(DEMO_EMAILS))).all())
+            updated_accounts = 0
+            changes_pending = False
+            for user in demo_users:
+                if not verify_password(PASSWORD, user.password_hash):
+                    user.password_hash = hash_password(PASSWORD)
+                    updated_accounts += 1
+                    changes_pending = True
             if not db.scalar(select(SourceBatch.id).limit(1)):
                 observations = list(db.scalars(select(Observation)).all())
                 if observations:
@@ -26,7 +43,18 @@ def seed() -> None:
                     db.flush()
                     admin = db.scalar(select(User).where(User.role == "administrator"))
                     db.add(AuditEvent(actor_id=admin.id if admin else None, event_type="seed.source_batch_completed", entity_type="source_batch", entity_id=batch.id, detail={"observations": len(observations), "synthetic_only": True}))
-                    db.commit()
+                    changes_pending = True
+            if updated_accounts:
+                admin = db.scalar(select(User).where(User.role == "administrator"))
+                db.add(AuditEvent(
+                    actor_id=admin.id if admin else None,
+                    event_type="seed.demo_credentials_aligned",
+                    entity_type="synthetic_dataset",
+                    entity_id="sentinel-100",
+                    detail={"accounts_updated": updated_accounts, "synthetic_only": True},
+                ))
+            if changes_pending:
+                db.commit()
             return
         organisations = [
             Organization(code="ASTER", name="Aster General Hospital", district="Aster District"),

@@ -40,11 +40,11 @@ Demo accounts are created only in the local synthetic database:
 
 | Role | Email | Password |
 | --- | --- | --- |
-| Administrator | admin@sentinel.demo | SentinelDemo!2026 |
-| CAIO governance reviewer | caio@sentinel.demo | SentinelDemo!2026 |
-| Aster clinician | clinician.aster@sentinel.demo | SentinelDemo!2026 |
-| Approved researcher | researcher.approved@sentinel.demo | SentinelDemo!2026 |
-| Denied researcher | researcher.denied@sentinel.demo | SentinelDemo!2026 |
+| Administrator | admin@sentinel.demo | 12345 |
+| CAIO governance reviewer | caio@sentinel.demo | 12345 |
+| Aster clinician | clinician.aster@sentinel.demo | 12345 |
+| Approved researcher | researcher.approved@sentinel.demo | 12345 |
+| Denied researcher | researcher.denied@sentinel.demo | 12345 |
 
 ## AI governance lifecycle MVP
 
@@ -109,7 +109,7 @@ The importer validates only this UCUM subset: `%`, `mmol/mol`, `mmol/L`, `mg/dL`
 Use the sample only with an existing synthetic profile; it is not suitable for real records:
 
 ```powershell
-$login = Invoke-RestMethod http://localhost:8000/api/auth/login -Method POST -ContentType 'application/json' -Body '{"email":"admin@sentinel.demo","password":"SentinelDemo!2026"}'
+$login = Invoke-RestMethod http://localhost:8000/api/auth/login -Method POST -ContentType 'application/json' -Body '{"email":"admin@sentinel.demo","password":"12345"}'
 $headers = @{ Authorization = "Bearer $($login.access_token)" }
 $patient = (Invoke-RestMethod http://localhost:8000/api/patients -Headers $headers)[0]
 Invoke-RestMethod "http://localhost:8000/api/fhir/r4/Patient/$($patient.id)/`$everything" -Headers $headers

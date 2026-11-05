@@ -86,7 +86,7 @@ function App() {
 }
 
 function Login({ onLogin }: { onLogin: (data: RecordValue) => void }) {
-  const [email, setEmail] = useState("admin@sentinel.demo"); const [password, setPassword] = useState("SentinelDemo!2026"); const [error, setError] = useState("");
+  const [email, setEmail] = useState("admin@sentinel.demo"); const [password, setPassword] = useState("12345"); const [error, setError] = useState("");
   const submit = async (event: FormEvent) => { event.preventDefault(); try { setError(""); onLogin(await api("/auth/login", undefined, { method: "POST", body: JSON.stringify({ email, password }) })); } catch (err: any) { setError(err.message); } };
   return <div className="login-shell" style={{ backgroundImage: `linear-gradient(100deg, rgba(4,17,28,.94), rgba(7,29,39,.52)), url(${aurora})` }}><section className="login-card"><div className="brand login-brand"><span className="brand-mark">⌁</span><span>Sentinel <b>Network</b></span></div><p className="eyebrow">AUTHORISED SYNTHETIC DEMO</p><h1>Evidence before action.</h1><p>Local surveillance, CPG review, protected research, and verifiable integrity—without autonomous clinical decisions.</p><form onSubmit={submit}><label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <div className="error">{error}</div>}<button className="primary wide">Enter authorised workspace</button></form><small>Use only the documented synthetic demo accounts.</small></section></div>;
 }

@@ -14,12 +14,12 @@ from app.chain import verify_batch
 from app.db import Base, SessionLocal, engine, initialise_database
 from app.guideline_tree import assessment
 from app.governance import build_governance_dashboard
-from app.main import GovernanceReviewPayload, McpDemoSessionPayload, execute_scan, record_governance_review, scheduled_scan, start_mcp_demo_session
+from app.main import GovernanceReviewPayload, LoginPayload, McpDemoSessionPayload, execute_scan, record_governance_review, scheduled_scan, start_mcp_demo_session
 from app.mcp_access import KeyApproval, approve_key, revoke_key, valid_key
 from app.mdt import run_three_member_mdt
 from app.models import AgentAccessKey, AuditEvent, GovernanceReview, McpDemoSession, Observation, Patient, Scan, SourceBatch, User
 from app.seed import seed
-from app.security import require_roles
+from app.security import require_roles, verify_password
 from app.services.sentinel_agent import advance_notification_workflows
 
 
@@ -34,6 +34,18 @@ def test_seed_has_exact_care_mix():
         assert db.scalar(select(func.count()).select_from(Patient)) == 100
         counts = dict(db.execute(select(Patient.care_setting, func.count()).group_by(Patient.care_setting)).all())
         assert counts == {"Medical Ward": 25, "O&G Ward": 12, "Outpatient Clinic": 45, "Surgical Ward": 18}
+
+
+def test_synthetic_demo_accounts_use_documented_password():
+    assert LoginPayload(email="admin@sentinel.demo", password="12345").password == "12345"
+    with SessionLocal() as db:
+        users = list(db.scalars(select(User).where(User.email.in_((
+            "admin@sentinel.demo", "caio@sentinel.demo", "clinician.aster@sentinel.demo",
+            "clinician.beryl@sentinel.demo", "clinician.cobalt@sentinel.demo",
+            "researcher.approved@sentinel.demo", "researcher.denied@sentinel.demo",
+        )))).all())
+        assert len(users) == 7
+        assert all(verify_password("12345", user.password_hash) for user in users)
 
 
 def test_scan_and_clinician_scope():
