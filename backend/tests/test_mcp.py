@@ -88,7 +88,8 @@ def test_no_key_invalid_key_and_login_token_denied(access):
 def test_status_key_cannot_read_any_patient_or_arbitrary_tool(access):
     issued = access.issue()
     assert issued.status_code == 200
-    token = issued.json()["api_key"]
+    issued_payload = issued.json()
+    token = issued_payload["api_key"]
     response = rpc(token, "tools/call", {"name": "service_status", "arguments": {}})
     assert response.status_code == 200
     assert not response.json()["result"].get("isError")
@@ -140,12 +141,13 @@ def test_caio_has_system_synthetic_read_but_no_write_or_key_control(access):
         user_id=access.caio.id,
         scopes=["status:read", "clinical:read:system", "governance:read", "research:aggregate"],
     )
-    token = issued.json()["api_key"]
+    issued_payload = issued.json()
+    token = issued_payload["api_key"]
     cross_hospital = rpc(token, "tools/call", {"name": "patient_record", "arguments": {"patient_id": access.patients[2].id}})
     assert not cross_hospital.json()["result"].get("isError")
     governance = rpc(token, "tools/call", {"name": "governance_summary", "arguments": {}})
     assert not governance.json()["result"].get("isError")
-    assert "token_hash" not in governance.text and issued["api_key"] not in governance.text
+    assert "token_hash" not in governance.text and issued_payload["api_key"] not in governance.text
     activity = rpc(token, "tools/call", {"name": "mcp_activity", "arguments": {}})
     assert not activity.json()["result"].get("isError")
     denied = rpc(token, "tools/call", {"name": "approve_key", "arguments": {}})
