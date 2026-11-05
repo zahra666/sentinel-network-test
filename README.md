@@ -71,7 +71,7 @@ Copy the emitted `CHAIN_CONTRACT_ADDRESS` and local RPC URL to `.env`, restart t
 
 ## Supabase data authority
 
-The committed schema migration is [20261104163106_initial_sentinel_schema.sql](supabase/migrations/20261104163106_initial_sentinel_schema.sql). Every exposed `public` table has RLS enabled and neither `anon` nor `authenticated` is granted table access. The browser uses the FastAPI API only; it never includes a Supabase client or service credential. Run [001_rls_denial.sql](supabase/tests/001_rls_denial.sql) against a disposable Supabase database after applying the migration.
+The committed migrations establish the schema, time-bounded MCP-demo sessions and foreign-key index coverage: [initial schema](supabase/migrations/20261104163106_initial_sentinel_schema.sql), [MCP sessions](supabase/migrations/20261105170000_add_mcp_demo_sessions.sql), and [index coverage](supabase/migrations/20261105174500_add_foreign_key_indexes.sql). The idempotent [synthetic bootstrap](supabase/seed_synthetic.sql) creates only the documented fictional demo cohort. Every exposed `public` table has RLS enabled and neither `anon` nor `authenticated` is granted table access. The browser uses the FastAPI API only; it never includes a Supabase client or service credential. Run [001_rls_denial.sql](supabase/tests/001_rls_denial.sql) against a disposable Supabase database after applying the migrations.
 
 Use a server-only Postgres connection string for `DATABASE_URL` on Render. Do not put that URL, a Supabase service key, or a private key in `VITE_*` variables or the static site.
 
@@ -117,7 +117,7 @@ $bundle = (Get-Content .\examples\fhir-r4-import.json -Raw).Replace('REPLACE_WIT
 Invoke-RestMethod http://localhost:8000/api/fhir/r4/import -Method POST -Headers $headers -ContentType 'application/json' -Body $bundle
 ```
 
-The FHIR endpoints have automated coverage for round trips, duplicate idempotency, invalid resource/timestamp/unit rejection, patient-reference resolution, ambiguous terminology review states, source correction provenance/reprocessing, supported conversions, and clinical/research organisation controls. Remote Supabase migration/RLS verification remains pending until the user selects a new Supabase project.
+The FHIR endpoints have automated coverage for round trips, duplicate idempotency, invalid resource/timestamp/unit rejection, patient-reference resolution, ambiguous terminology review states, source correction provenance/reprocessing, supported conversions, and clinical/research organisation controls. Re-run the migration, seed and RLS-denial checks for every independently provisioned Supabase project before use.
 
 ## Cloud release contract
 

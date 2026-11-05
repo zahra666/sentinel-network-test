@@ -74,6 +74,9 @@ class FhirImportPayload(BaseModel):
 @app.on_event("startup")
 def startup() -> None:
     initialise_database()
+    if get_settings().seed_synthetic_data:
+        from .seed import seed
+        seed()
 
 
 @app.get("/health")

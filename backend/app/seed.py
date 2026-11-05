@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from .chain import build_source_batch
 from .db import SessionLocal, initialise_database
-from .models import AuditEvent, Condition, Observation, Organization, Patient, ResearchGrant, User
+from .models import AuditEvent, Condition, Observation, Organization, Patient, ResearchGrant, SourceBatch, User
 from .security import hash_password
 from .terminology import LOINC_SYSTEM, LOINC_VERSION, SNOMED_SYSTEM, TerminologyError, map_measurement
 
@@ -18,6 +18,15 @@ def seed() -> None:
     initialise_database()
     with SessionLocal() as db:
         if db.scalar(select(User.id).limit(1)):
+            if not db.scalar(select(SourceBatch.id).limit(1)):
+                observations = list(db.scalars(select(Observation)).all())
+                if observations:
+                    batch = build_source_batch(observations)
+                    db.add(batch)
+                    db.flush()
+                    admin = db.scalar(select(User).where(User.role == "administrator"))
+                    db.add(AuditEvent(actor_id=admin.id if admin else None, event_type="seed.source_batch_completed", entity_type="source_batch", entity_id=batch.id, detail={"observations": len(observations), "synthetic_only": True}))
+                    db.commit()
             return
         organisations = [
             Organization(code="ASTER", name="Aster General Hospital", district="Aster District"),

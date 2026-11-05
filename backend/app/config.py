@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     schedule_timezone: str = "Asia/Kuala_Lumpur"
     scheduler_trigger_token: str = ""
     scheduler_mode: str = "local_apscheduler"
+    seed_synthetic_data: bool = False
     alert_reminder_minutes: int = 1440
     alert_escalation_minutes: int = 2880
     chain_rpc_url: str = ""

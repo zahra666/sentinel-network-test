@@ -17,7 +17,7 @@ from app.governance import build_governance_dashboard
 from app.main import GovernanceReviewPayload, McpDemoSessionPayload, execute_scan, record_governance_review, scheduled_scan, start_mcp_demo_session
 from app.mcp_access import KeyApproval, approve_key, revoke_key, valid_key
 from app.mdt import run_three_member_mdt
-from app.models import AgentAccessKey, AuditEvent, GovernanceReview, McpDemoSession, Observation, Patient, Scan, User
+from app.models import AgentAccessKey, AuditEvent, GovernanceReview, McpDemoSession, Observation, Patient, Scan, SourceBatch, User
 from app.seed import seed
 from app.security import require_roles
 from app.services.sentinel_agent import advance_notification_workflows
@@ -174,3 +174,15 @@ def test_github_scheduler_requires_shared_secret(monkeypatch):
         assert result["status"] == "completed"
         event = db.scalar(select(AuditEvent).where(AuditEvent.event_type == "scheduler.github_triggered").order_by(AuditEvent.created_at.desc()))
         assert event is not None and event.detail["mode"] == "github_actions"
+
+
+def test_existing_cloud_seed_bootstraps_its_missing_source_batch():
+    """The cloud SQL bootstrap can predate the first FastAPI process start."""
+    with SessionLocal() as db:
+        db.query(SourceBatch).delete()
+        db.commit()
+    seed()
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(SourceBatch)) == 1
+        event = db.scalar(select(AuditEvent).where(AuditEvent.event_type == "seed.source_batch_completed"))
+        assert event is not None

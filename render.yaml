@@ -7,3 +7,27 @@ services:
     buildCommand: pip install .
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
+    envVars:
+      - key: SEED_SYNTHETIC_DATA
+        value: true
+      - key: MCP_ENABLED
+        value: true
+      - key: SCHEDULE_ENABLED
+        value: true
+      - key: SCHEDULER_MODE
+        value: github_actions
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_SECRET
+        sync: false
+      - key: SCHEDULER_TRIGGER_TOKEN
+        sync: false
+      # Set to the exact private Sites origin after publishing.
+      - key: ALLOWED_ORIGINS
+        sync: false
+      # Set to the exact Render hostname (for example, service.onrender.com).
+      - key: MCP_ALLOWED_HOSTS
+        sync: false
+      # Keep empty for headless MCP clients unless a known browser MCP origin is needed.
+      - key: MCP_ALLOWED_ORIGINS
+        sync: false
