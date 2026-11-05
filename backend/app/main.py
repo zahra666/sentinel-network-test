@@ -5,6 +5,7 @@ from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -13,10 +14,12 @@ from .agent import chat, enqueue_task, process_task
 from .chain import ChainUnavailable, anchor_batch, anchor_research_grant, revoke_research_grant, verify_batch, verify_research_grant
 from .config import get_settings
 from .db import get_db, initialise_database
+from .fhir_r4 import FhirValidationError, condition_resource, everything_bundle, import_bundle, observation_resource, patient_resource, report_resource
 from .governance import build_governance_dashboard, review_snapshot
 from .guideline_tree import assessment
-from .models import AgentMessage, Alert, AuditEvent, DelegatedTask, Finding, GovernanceReview, MdtReview, NotificationAttempt, Observation, Organization, Patient, ResearchGrant, Scan, SourceBatch, User
+from .models import AgentMessage, Alert, AuditEvent, Condition, DelegatedTask, DiagnosticReport, Finding, GovernanceReview, MdtReview, NotificationAttempt, Observation, Organization, Patient, ResearchGrant, Scan, SourceBatch, User
 from .mdt import run_three_member_mdt
+from .mcp_access import router as mcp_access_router
 from .security import create_token, current_user, require_roles, verify_password
 from .services.analyse import analyse_patients
 from .services.route import mark_alert, route_findings
@@ -25,6 +28,11 @@ from .services.sync import sync_synthetic_records
 
 app = FastAPI(title="Sentinel Network", version="0.1.0", description="Synthetic data — demonstration only. Clinician review required.")
 app.add_middleware(CORSMiddleware, allow_origins=get_settings().origins, allow_credentials=False, allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type"])
+app.include_router(mcp_access_router)
+
+
+class FhirR4JsonResponse(JSONResponse):
+    media_type = "application/fhir+json"
 
 
 class LoginPayload(BaseModel):
@@ -52,6 +60,10 @@ class MdtAttestation(BaseModel):
 
 class GovernanceReviewPayload(BaseModel):
     note: str | None = Field(default=None, max_length=1000)
+
+
+class FhirImportPayload(BaseModel):
+    bundle: dict
 
 
 @app.on_event("startup")
@@ -134,7 +146,68 @@ def patients(user: User = Depends(require_roles("administrator", "clinician")), 
 def patient_detail(patient_id: str, user: User = Depends(require_roles("administrator", "clinician")), db: Session = Depends(get_db)) -> dict:
     patient = authorised_patient(patient_id, user, db)
     observations = list(db.scalars(select(Observation).where(Observation.patient_id == patient.id).order_by(Observation.observed_at)).all())
-    return {**serialize_patient(patient, db), "observations": [serialize_observation(item) for item in observations], "guideline_assessment": assessment(patient, observations)}
+    conditions = list(db.scalars(select(Condition).where(Condition.patient_id == patient.id).order_by(Condition.recorded_at)).all())
+    reports = list(db.scalars(select(DiagnosticReport).where(DiagnosticReport.patient_id == patient.id).order_by(DiagnosticReport.effective_at)).all())
+    return {**serialize_patient(patient, db), "observations": [serialize_observation(item) for item in observations],
+            "conditions": [serialize_condition(item) for item in conditions], "diagnostic_reports": [serialize_diagnostic_report(item) for item in reports],
+            "guideline_assessment": assessment(patient, observations)}
+
+
+@app.get("/api/fhir/r4/Patient/{patient_id}", response_class=FhirR4JsonResponse)
+def fhir_patient(patient_id: str, user: User = Depends(require_roles("administrator", "clinician")), db: Session = Depends(get_db)) -> dict:
+    return patient_resource(authorised_patient(patient_id, user, db))
+
+
+@app.get("/api/fhir/r4/Patient/{patient_id}/$everything", response_class=FhirR4JsonResponse)
+def fhir_everything(patient_id: str, user: User = Depends(require_roles("administrator", "clinician")), db: Session = Depends(get_db)) -> dict:
+    patient = authorised_patient(patient_id, user, db)
+    observations = list(db.scalars(select(Observation).where(Observation.patient_id == patient.id).order_by(Observation.observed_at)).all())
+    conditions = list(db.scalars(select(Condition).where(Condition.patient_id == patient.id).order_by(Condition.recorded_at)).all())
+    reports = list(db.scalars(select(DiagnosticReport).where(DiagnosticReport.patient_id == patient.id).order_by(DiagnosticReport.effective_at)).all())
+    return everything_bundle(patient, observations, conditions, reports)
+
+
+@app.get("/api/fhir/r4/Observation/{observation_id}", response_class=FhirR4JsonResponse)
+def fhir_observation(observation_id: str, user: User = Depends(require_roles("administrator", "clinician")), db: Session = Depends(get_db)) -> dict:
+    item = db.get(Observation, observation_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Observation not found")
+    authorised_patient(item.patient_id, user, db)
+    return observation_resource(item)
+
+
+@app.get("/api/fhir/r4/Condition/{condition_id}", response_class=FhirR4JsonResponse)
+def fhir_condition(condition_id: str, user: User = Depends(require_roles("administrator", "clinician")), db: Session = Depends(get_db)) -> dict:
+    item = db.get(Condition, condition_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Condition not found")
+    authorised_patient(item.patient_id, user, db)
+    return condition_resource(item)
+
+
+@app.get("/api/fhir/r4/DiagnosticReport/{report_id}", response_class=FhirR4JsonResponse)
+def fhir_report(report_id: str, user: User = Depends(require_roles("administrator", "clinician")), db: Session = Depends(get_db)) -> dict:
+    item = db.get(DiagnosticReport, report_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="DiagnosticReport not found")
+    authorised_patient(item.patient_id, user, db)
+    return report_resource(item)
+
+
+@app.post("/api/fhir/r4/import")
+def fhir_import(payload: FhirImportPayload, user: User = Depends(require_roles("administrator", "clinician")), db: Session = Depends(get_db)) -> dict:
+    try:
+        outcome = import_bundle(db, user, payload.bundle)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FhirValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if outcome["reprocess_required"]:
+        scan = execute_scan(db, trigger="fhir_import", actor=user)
+        outcome["scan"] = serialize_scan(scan)
+    db.add(AuditEvent(actor_id=user.id, event_type="fhir.r4_imported", entity_type="fhir_bundle", entity_id="synthetic", detail={"resources": len(outcome["results"]), "reprocess_required": outcome["reprocess_required"]}))
+    db.commit()
+    return outcome
 
 
 @app.get("/api/alerts")
@@ -420,7 +493,28 @@ def serialize_patient(patient: Patient, db: Session) -> dict:
 
 
 def serialize_observation(item: Observation) -> dict:
-    return {"id": item.id, "code": item.code, "value": item.value, "unit": item.unit, "observed_at": item.observed_at.isoformat(), "ingested_at": item.ingested_at.isoformat(), "source_id": item.source_id, "version": item.version, "is_corrected": item.is_corrected, "is_late_arrival": item.is_late_arrival}
+    return {"id": item.id, "code": item.code, "original_code": item.original_code, "value": item.value, "unit": item.unit,
+            "coding": {"system": item.coding_system, "code": item.standard_code, "display": item.coding_display, "version": item.terminology_version},
+            "terminology_status": item.terminology_status, "ucum_unit": item.ucum_unit, "normalised_value": item.normalised_value,
+            "normalised_ucum_unit": item.normalised_ucum_unit, "result_status": item.result_status, "method": item.method,
+            "egfr_equation": item.egfr_equation, "corrects_observation_id": item.corrects_observation_id,
+            "observed_at": item.observed_at.isoformat(), "ingested_at": item.ingested_at.isoformat(), "source_id": item.source_id,
+            "version": item.version, "is_corrected": item.is_corrected, "is_late_arrival": item.is_late_arrival}
+
+
+def serialize_condition(item: Condition) -> dict:
+    return {"id": item.id, "source_id": item.source_id, "version": item.version, "clinical_status": item.clinical_status,
+            "verification_status": item.verification_status, "source_coding": {"system": item.source_coding_system, "code": item.source_code,
+            "display": item.source_display, "version": item.source_terminology_version}, "snomed": {"code": item.snomed_code,
+            "display": item.snomed_display, "version": item.snomed_version}, "terminology_status": item.terminology_status,
+            "recorded_at": item.recorded_at.isoformat()}
+
+
+def serialize_diagnostic_report(item: DiagnosticReport) -> dict:
+    return {"id": item.id, "source_id": item.source_id, "version": item.version, "status": item.status,
+            "coding": {"system": item.coding_system, "code": item.code, "display": item.display, "version": item.terminology_version},
+            "effective_at": item.effective_at.isoformat() if item.effective_at else None,
+            "issued_at": item.issued_at.isoformat() if item.issued_at else None, "result_observation_ids": item.result_observation_ids}
 
 
 def serialize_alert(alert: Alert, db: Session) -> dict:

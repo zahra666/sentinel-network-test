@@ -4,7 +4,7 @@ do $$
 declare
   table_name text;
   tables text[] := array[
-    'organizations', 'users', 'patients', 'observations', 'scans', 'findings',
+    'organizations', 'users', 'agent_access_keys', 'patients', 'observations', 'conditions', 'diagnostic_reports', 'scans', 'findings',
     'alerts', 'source_batches', 'research_grants', 'audit_events',
     'governance_reviews', 'notification_attempts', 'agent_conversations',
     'agent_messages', 'delegated_tasks', 'mdt_reviews'

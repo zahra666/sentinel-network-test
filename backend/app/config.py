@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./sentinel.db"
     app_secret: str = "local-development-only-change-me"
     allowed_origins: str = "http://localhost:5173"
+    mcp_enabled: bool = False
+    mcp_allowed_hosts: str = "127.0.0.1:8001,localhost:8001"
+    mcp_allowed_origins: str = ""
     schedule_enabled: bool = False
     schedule_hour: int = 2
     schedule_timezone: str = "Asia/Kuala_Lumpur"

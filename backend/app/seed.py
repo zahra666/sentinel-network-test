@@ -6,8 +6,9 @@ from sqlalchemy import select
 
 from .chain import build_source_batch
 from .db import SessionLocal, initialise_database
-from .models import AuditEvent, Observation, Organization, Patient, ResearchGrant, User
+from .models import AuditEvent, Condition, Observation, Organization, Patient, ResearchGrant, User
 from .security import hash_password
+from .terminology import LOINC_SYSTEM, LOINC_VERSION, SNOMED_SYSTEM, TerminologyError, map_measurement
 
 PASSWORD = "SentinelDemo!2026"
 ANCHOR = datetime(2026, 10, 31, 8, 0, tzinfo=timezone.utc)
@@ -48,6 +49,7 @@ def seed() -> None:
                 db.add(patient)
         db.flush()
 
+        conditions: list[Condition] = []
         observations: list[Observation] = []
         for index, patient in enumerate(patients, start=1):
             abnormal = index % 11 == 0 or index in {1, 17, 45}
@@ -56,9 +58,50 @@ def seed() -> None:
             unit = "mg/dL" if index == 7 else "mmol/L"
             values = [("hba1c", hba1c_early, "%", 50), ("fpg", fpg_early, unit, 48), ("hba1c", hba1c_late, "%", 12), ("fpg", fpg_late, unit, 10)]
             if index != 9:
-                values.append(("egfr", 72.0 - (index % 9), "mL/min/1.73m2", 8))
+                values.append(("egfr", 72.0 - (index % 9), "mL/min/{1.73_m2}", 8))
+            conditions.append(Condition(
+                patient_id=patient.id, source_id=f"COND-{index:03d}", version=1,
+                clinical_status="active", verification_status="confirmed",
+                source_coding_system=SNOMED_SYSTEM, source_code="44054006",
+                source_display="Diabetes mellitus type 2 (disorder)",
+                snomed_code="44054006", snomed_display="Diabetes mellitus type 2 (disorder)",
+                terminology_status="verified", recorded_at=ANCHOR,
+                provenance={"source": "deterministic synthetic seed", "synthetic_only": True},
+            ))
             for sequence, (code, value, item_unit, days_ago) in enumerate(values, start=1):
-                observations.append(Observation(patient_id=patient.id, code=code, value=value, unit=item_unit, observed_at=ANCHOR - timedelta(days=days_ago), ingested_at=ANCHOR - timedelta(days=max(days_ago - 1, 0)), source_id=f"SRC-{index:03d}-{sequence}", version=1, is_late_arrival=index == 13 and sequence == 1))
+                loinc_code, local_code = {
+                    "hba1c": ("4548-4", "HBA1C"),
+                    "fpg": ("14749-6", "FPG"),
+                    "egfr": ("62238-1", "EGFR_CKD_EPI"),
+                }[code]
+                try:
+                    mapping = map_measurement(
+                        system=LOINC_SYSTEM, code=loinc_code, display=None, version=LOINC_VERSION,
+                        original_code=local_code, value=value, ucum_unit=item_unit,
+                    )
+                except TerminologyError:
+                    # Deliberate synthetic inconsistent-unit fixture. It remains
+                    # preserved and is explicitly excluded from rule comparisons.
+                    mapping = {
+                        "coding_system": LOINC_SYSTEM, "standard_code": loinc_code,
+                        "coding_display": None, "terminology_version": LOINC_VERSION,
+                        "original_code": local_code, "clinical_key": None,
+                        "terminology_status": "unit_incompatible", "normalised_value": None,
+                        "normalised_ucum_unit": None,
+                        "conversion_provenance": {"reason": "deliberate synthetic incompatible-unit fixture"},
+                    }
+                observations.append(Observation(
+                    patient_id=patient.id, code=code, value=value, unit=item_unit,
+                    observed_at=ANCHOR - timedelta(days=days_ago),
+                    ingested_at=ANCHOR - timedelta(days=max(days_ago - 1, 0)),
+                    source_id=f"SRC-{index:03d}-{sequence}", version=1,
+                    is_late_arrival=index == 13 and sequence == 1,
+                    ucum_unit=item_unit, result_status="final", method=("CKD-EPI creatinine-based formula / 1.73 sq M" if code == "egfr" else None),
+                    egfr_equation=("CKD-EPI" if code == "egfr" else None),
+                    provenance={"source": "deterministic synthetic seed", "synthetic_only": True, **mapping["conversion_provenance"]},
+                    **{key: mapping[key] for key in ("original_code", "coding_system", "standard_code", "coding_display", "terminology_version", "clinical_key", "terminology_status", "normalised_value", "normalised_ucum_unit")},
+                ))
+        db.add_all(conditions)
         db.add_all(observations)
         db.flush()
         batch = build_source_batch(observations)

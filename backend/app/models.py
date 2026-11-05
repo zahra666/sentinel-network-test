@@ -37,6 +37,22 @@ class User(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class AgentAccessKey(Base):
+    __tablename__ = "agent_access_keys"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    purpose: Mapped[str] = mapped_column(String(240))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    approved_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    scopes: Mapped[list] = mapped_column(JSON, default=list)
+    patient_ids: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Patient(Base):
     __tablename__ = "patients"
 
@@ -52,6 +68,8 @@ class Patient(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     observations: Mapped[list["Observation"]] = relationship(back_populates="patient", cascade="all, delete-orphan")
+    conditions: Mapped[list["Condition"]] = relationship(back_populates="patient", cascade="all, delete-orphan")
+    diagnostic_reports: Mapped[list["DiagnosticReport"]] = relationship(back_populates="patient", cascade="all, delete-orphan")
 
 
 class Observation(Base):
@@ -69,7 +87,70 @@ class Observation(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     is_corrected: Mapped[bool] = mapped_column(Boolean, default=False)
     is_late_arrival: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Original source representation remains authoritative; normalised values
+    # are an explicitly limited derived layer for compatible-rule evaluation.
+    original_code: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    coding_system: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    standard_code: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    coding_display: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    terminology_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    terminology_status: Mapped[str] = mapped_column(String(48), default="needs_terminology_review", index=True)
+    clinical_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    ucum_unit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    normalised_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    normalised_ucum_unit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    result_status: Mapped[str] = mapped_column(String(32), default="final")
+    method: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    egfr_equation: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    fhir_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    corrects_observation_id: Mapped[str | None] = mapped_column(ForeignKey("observations.id"), nullable=True, index=True)
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
     patient: Mapped[Patient] = relationship(back_populates="observations")
+
+
+class Condition(Base):
+    __tablename__ = "conditions"
+    __table_args__ = (UniqueConstraint("source_id", "version", name="uq_condition_source_version"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    patient_id: Mapped[str] = mapped_column(ForeignKey("patients.id"), index=True)
+    source_id: Mapped[str] = mapped_column(String(96), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    clinical_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    verification_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_coding_system: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    source_code: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    source_display: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    source_terminology_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    snomed_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    snomed_display: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    snomed_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    terminology_status: Mapped[str] = mapped_column(String(48), default="needs_terminology_review", index=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    fhir_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
+    patient: Mapped[Patient] = relationship(back_populates="conditions")
+
+
+class DiagnosticReport(Base):
+    __tablename__ = "diagnostic_reports"
+    __table_args__ = (UniqueConstraint("source_id", "version", name="uq_report_source_version"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    patient_id: Mapped[str] = mapped_column(ForeignKey("patients.id"), index=True)
+    source_id: Mapped[str] = mapped_column(String(96), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(32))
+    coding_system: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    code: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    display: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    terminology_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result_observation_ids: Mapped[list] = mapped_column(JSON, default=list)
+    fhir_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
+    patient: Mapped[Patient] = relationship(back_populates="diagnostic_reports")
 
 
 class Scan(Base):

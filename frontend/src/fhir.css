@@ -1,0 +1,21 @@
+.coding-detail {
+  grid-column: 1 / -1;
+  margin-top: 5px;
+  color: #6b8185;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.condition-summary {
+  display: grid;
+  gap: 7px;
+  margin-top: 16px;
+  padding: 11px;
+  background: #f4faf8;
+  border: 1px solid #e0f0eb;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.condition-summary span { color: #49676a; }
+.condition-summary small { margin-left: 5px; color: #70878b; }

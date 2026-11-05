@@ -5,6 +5,7 @@ os.environ["APP_SECRET"] = "test-secret"
 
 import pytest
 from fastapi import HTTPException
+from starlette.responses import Response
 from sqlalchemy import func, select
 
 from app.chain import verify_batch
@@ -12,8 +13,9 @@ from app.db import Base, SessionLocal, engine, initialise_database
 from app.guideline_tree import assessment
 from app.governance import build_governance_dashboard
 from app.main import GovernanceReviewPayload, execute_scan, record_governance_review
+from app.mcp_access import KeyApproval, approve_key, revoke_key, valid_key
 from app.mdt import run_three_member_mdt
-from app.models import AuditEvent, GovernanceReview, Observation, Patient, Scan, User
+from app.models import AgentAccessKey, AuditEvent, GovernanceReview, Observation, Patient, Scan, User
 from app.seed import seed
 from app.security import require_roles
 from app.services.sentinel_agent import advance_notification_workflows
@@ -110,3 +112,30 @@ def test_governance_is_admin_only_and_records_review_evidence():
         event = db.scalar(select(AuditEvent).where(AuditEvent.event_type == "governance.review_attested").order_by(AuditEvent.created_at.desc()))
         assert event is not None
         assert event.detail["llm_status"] == "planned / not configured"
+
+
+def test_mcp_key_is_one_time_scoped_and_revocable():
+    with SessionLocal() as db:
+        admin = db.scalar(select(User).where(User.role == "administrator"))
+        clinician = db.scalar(select(User).where(User.email == "clinician.aster@sentinel.demo"))
+        approved_patient = db.scalar(select(Patient).where(Patient.organization_id == clinician.organization_id))
+        issued = approve_key(
+            KeyApproval(name="Synthetic reviewer", purpose="Read one synthetic evidence record", user_id=clinician.id,
+                        scopes=["status:read", "patient:read"], patient_ids=[approved_patient.id], expires_in_minutes=30),
+            Response(), admin, db,
+        )
+        key = db.get(AgentAccessKey, issued["id"])
+        assert issued["api_key"].startswith("snt_mcp_")
+        assert key.token_hash != issued["api_key"]
+        assert valid_key(db, key).id == clinician.id
+        revoke_key(key.id, admin, db)
+        with pytest.raises(HTTPException, match="Invalid or expired"):
+            valid_key(db, key)
+
+        outside_patient = db.scalar(select(Patient).where(Patient.organization_id != clinician.organization_id))
+        with pytest.raises(HTTPException, match="(?i)clinical access"):
+            approve_key(
+                KeyApproval(name="Invalid scope", purpose="Must not cross hospital boundary", user_id=clinician.id,
+                            scopes=["patient:read"], patient_ids=[outside_patient.id], expires_in_minutes=30),
+                Response(), admin, db,
+            )

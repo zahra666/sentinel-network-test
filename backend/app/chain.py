@@ -24,7 +24,15 @@ class ChainUnavailable(RuntimeError):
 
 
 def manifest_for(observations: list[Observation]) -> list[dict]:
-    rows = [{"id": item.id, "patient_id": item.patient_id, "code": item.code, "value": item.value, "unit": item.unit, "observed_at": _canonical_time(item.observed_at), "source_id": item.source_id, "version": item.version} for item in observations]
+    rows = [{
+        "id": item.id, "patient_id": item.patient_id, "code": item.code,
+        "original_code": item.original_code, "coding_system": item.coding_system,
+        "standard_code": item.standard_code, "terminology_status": item.terminology_status,
+        "value": item.value, "unit": item.unit, "ucum_unit": item.ucum_unit,
+        "normalised_value": item.normalised_value, "normalised_ucum_unit": item.normalised_ucum_unit,
+        "result_status": item.result_status, "corrects_observation_id": item.corrects_observation_id,
+        "observed_at": _canonical_time(item.observed_at), "source_id": item.source_id, "version": item.version,
+    } for item in observations]
     return sorted(rows, key=lambda row: (row["source_id"], row["version"], row["id"]))
 
 

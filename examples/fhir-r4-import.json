@@ -1,0 +1,36 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "fullUrl": "urn:uuid:patient-demo",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "REPLACE_WITH_EXISTING_SYNTHETIC_PATIENT_UUID",
+        "identifier": [{
+          "system": "urn:sentinel:synthetic-patient-reference",
+          "value": "REPLACE_WITH_EXISTING_SYNTHETIC_REFERENCE"
+        }]
+      }
+    },
+    {
+      "fullUrl": "urn:uuid:observation-demo",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "demo-hba1c-1",
+        "meta": {"versionId": "1"},
+        "identifier": [{"system": "urn:sentinel:source-id", "value": "DEMO-FHIR-HBA1C-001"}],
+        "status": "final",
+        "code": {"coding": [{"system": "http://loinc.org", "code": "4548-4"}]},
+        "subject": {"reference": "urn:uuid:patient-demo"},
+        "effectiveDateTime": "2026-11-05T09:00:00+08:00",
+        "issued": "2026-11-05T09:10:00+08:00",
+        "valueQuantity": {"value": 7.2, "unit": "%", "system": "http://unitsofmeasure.org", "code": "%"},
+        "extension": [{
+          "url": "https://sentinel.demo/fhir/StructureDefinition/original-local-test-code",
+          "valueString": "HBA1C"
+        }]
+      }
+    }
+  ]
+}

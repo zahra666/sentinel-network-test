@@ -17,6 +17,20 @@ create table public.users (
   active boolean not null default true
 );
 
+create table public.agent_access_keys (
+  id varchar(36) primary key,
+  token_hash varchar(64) not null unique,
+  name varchar(80) not null,
+  purpose varchar(240) not null,
+  user_id varchar(36) not null references public.users(id),
+  approved_by varchar(36) not null references public.users(id),
+  scopes jsonb not null default '[]'::jsonb,
+  patient_ids jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  revoked_at timestamptz
+);
+
 create table public.patients (
   id varchar(36) primary key,
   reference varchar(40) not null unique,
@@ -42,7 +56,62 @@ create table public.observations (
   version integer not null default 1,
   is_corrected boolean not null default false,
   is_late_arrival boolean not null default false,
+  original_code varchar(96),
+  coding_system varchar(160),
+  standard_code varchar(64),
+  coding_display varchar(240),
+  terminology_version varchar(64),
+  terminology_status varchar(48) not null default 'needs_terminology_review',
+  clinical_key varchar(64),
+  ucum_unit varchar(64),
+  normalised_value double precision,
+  normalised_ucum_unit varchar(64),
+  result_status varchar(32) not null default 'final',
+  method varchar(160),
+  egfr_equation varchar(160),
+  fhir_id varchar(64),
+  corrects_observation_id varchar(36) references public.observations(id),
+  provenance jsonb not null default '{}'::jsonb,
   constraint uq_source_version unique (source_id, version)
+);
+
+create table public.conditions (
+  id varchar(36) primary key,
+  patient_id varchar(36) not null references public.patients(id),
+  source_id varchar(96) not null,
+  version integer not null default 1,
+  clinical_status varchar(32),
+  verification_status varchar(32),
+  source_coding_system varchar(160),
+  source_code varchar(96),
+  source_display varchar(240),
+  source_terminology_version varchar(64),
+  snomed_code varchar(32),
+  snomed_display varchar(240),
+  snomed_version varchar(64),
+  terminology_status varchar(48) not null default 'needs_terminology_review',
+  recorded_at timestamptz not null default now(),
+  fhir_id varchar(64),
+  provenance jsonb not null default '{}'::jsonb,
+  constraint uq_condition_source_version unique (source_id, version)
+);
+
+create table public.diagnostic_reports (
+  id varchar(36) primary key,
+  patient_id varchar(36) not null references public.patients(id),
+  source_id varchar(96) not null,
+  version integer not null default 1,
+  status varchar(32) not null,
+  coding_system varchar(160),
+  code varchar(96),
+  display varchar(240),
+  terminology_version varchar(64),
+  effective_at timestamptz,
+  issued_at timestamptz,
+  result_observation_ids jsonb not null default '[]'::jsonb,
+  fhir_id varchar(64),
+  provenance jsonb not null default '{}'::jsonb,
+  constraint uq_report_source_version unique (source_id, version)
 );
 
 create table public.scans (
@@ -178,10 +247,18 @@ create table public.mdt_reviews (
 );
 
 create index patients_organization_id_idx on public.patients(organization_id);
+create index agent_access_keys_user_id_idx on public.agent_access_keys(user_id);
 create index patients_care_setting_idx on public.patients(care_setting);
 create index observations_patient_id_idx on public.observations(patient_id);
 create index observations_observed_at_idx on public.observations(observed_at);
 create index observations_code_idx on public.observations(code);
+create index observations_standard_code_idx on public.observations(standard_code);
+create index observations_terminology_status_idx on public.observations(terminology_status);
+create index observations_clinical_key_idx on public.observations(clinical_key);
+create index observations_corrects_observation_id_idx on public.observations(corrects_observation_id);
+create index conditions_patient_id_idx on public.conditions(patient_id);
+create index conditions_snomed_code_idx on public.conditions(snomed_code);
+create index diagnostic_reports_patient_id_idx on public.diagnostic_reports(patient_id);
 create index findings_scan_id_idx on public.findings(scan_id);
 create index findings_patient_id_idx on public.findings(patient_id);
 create index alerts_patient_id_idx on public.alerts(patient_id);
@@ -196,8 +273,11 @@ create index mdt_reviews_patient_id_idx on public.mdt_reviews(patient_id);
 -- connection. RLS has no allow policies and Data API roles receive no grants.
 alter table public.organizations enable row level security;
 alter table public.users enable row level security;
+alter table public.agent_access_keys enable row level security;
 alter table public.patients enable row level security;
 alter table public.observations enable row level security;
+alter table public.conditions enable row level security;
+alter table public.diagnostic_reports enable row level security;
 alter table public.scans enable row level security;
 alter table public.findings enable row level security;
 alter table public.alerts enable row level security;
@@ -212,7 +292,7 @@ alter table public.delegated_tasks enable row level security;
 alter table public.mdt_reviews enable row level security;
 
 revoke all privileges on table
-  public.organizations, public.users, public.patients, public.observations,
+  public.organizations, public.users, public.agent_access_keys, public.patients, public.observations, public.conditions, public.diagnostic_reports,
   public.scans, public.findings, public.alerts, public.source_batches,
   public.research_grants, public.audit_events, public.governance_reviews,
   public.notification_attempts, public.agent_conversations, public.agent_messages,

@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.uv-cache/
 .venv/
 backend/.venv/
 backend/sentinel.db
