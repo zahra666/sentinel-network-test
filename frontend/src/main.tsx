@@ -1,6 +1,6 @@
 import React, { FormEvent, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import aurora from "./assets/sentinel-aurora.png";
+import aurora from "./assets/sentinel-aurora-v2.png";
 import "./styles.css";
 import "./fhir.css";
 import "./governance.css";
