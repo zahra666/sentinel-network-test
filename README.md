@@ -6,7 +6,7 @@ Sentinel Network is a local-first, synthetic-data-only hackathon MVP for transpa
 
 ## Architecture
 
-External agents can use the optional, separate read-only MCP listener. Access requires an expiring administrator-approved API key; patient reads also require exact-patient approval and the account's current clinical/hospital permissions. MCP is disabled by default. See [MCP_ACCESS.md](MCP_ACCESS.md) for startup, approval, revocation and connection instructions.
+External agents can use the optional read-only MCP listener. A clinician key can read supported synthetic evidence in its current hospital; a CAIO key can read the supported synthetic system-wide demo surface, governance and fixed aggregate views. Keys are administrator-approved, hashed, expiring, auditable and revocable. MCP is disabled by default. See [MCP_ACCESS.md](MCP_ACCESS.md) for the bounded tools, profiles, approval, revocation and GrokBot trial.
 
 - `frontend/` — React + Vite desktop dashboard.
 - `backend/` — FastAPI API, SQLAlchemy persistence, APScheduler worker, deterministic rule/CPG review tree.
@@ -21,7 +21,7 @@ The default no-credential local mode uses SQLite. Supabase Postgres is the cloud
 - The deterministic, versioned CPG review tree performs data validity, applicability, evidence/confirmation, monitoring audit, and clinician-owned management/referral consideration. It is evidence support only—not diagnosis, treatment selection, urgency classification, or a referral order.
 - O&G records marked pregnancy-related are deliberately returned as **out of scope**, because this CPG does not cover diabetes in pregnancy.
 - **Sentinel Agent** is an authorised, persisted chat/orchestration layer. It can queue role-scoped evidence review, integrity verification, fixed aggregate-analysis handoff, or a public-source crawl restricted to HTTPS MOH/MEMS pages. It never passes patient data to the crawler.
-- A separately deployable, optional **MCP listener** is disabled by default. An administrator can issue a one-time, time-limited, hashed key to a named active user with either status-only or explicitly enumerated patient-read scope. The listener exposes two read-only tools, enforces hospital isolation, uses no browser-origin access by default, and records every allow/deny decision. Dashboard login tokens are never MCP credentials.
+- The optional **MCP listener** is disabled by default. It offers bounded, read-only tools for authorised synthetic evidence, FHIR R4 export, deterministic guideline/MDT review history, review queues, terminology, integrity, governance and fixed aggregates. Clinician keys remain hospital-scoped; the CAIO system-read profile is hackathon-demo-only. It never exposes a bulk export, writes, referrals, credentials or infrastructure control. Dashboard login tokens are never MCP credentials.
 - Its background workflow creates deduplicated **in-app** reminders and clinician-review-queue escalations only. It never contacts patients or external services.
 - The three-person Diabetes MDT is intentionally deterministic rather than an ANN: an evidence/confirmation reviewer, data-quality/complexity reviewer, and care-coordination reviewer. It can present endocrinology, bariatric-surgery, or GP-continuity **considerations** only. A clinician must select and attest an offered consideration; no referral is sent.
 
@@ -41,15 +41,16 @@ Demo accounts are created only in the local synthetic database:
 | Role | Email | Password |
 | --- | --- | --- |
 | Administrator | admin@sentinel.demo | SentinelDemo!2026 |
+| CAIO governance reviewer | caio@sentinel.demo | SentinelDemo!2026 |
 | Aster clinician | clinician.aster@sentinel.demo | SentinelDemo!2026 |
 | Approved researcher | researcher.approved@sentinel.demo | SentinelDemo!2026 |
 | Denied researcher | researcher.denied@sentinel.demo | SentinelDemo!2026 |
 
 ## AI governance lifecycle MVP
 
-Administrators can open **AI Governance** to review Sentinel's evidence-backed lifecycle controls. The page maps the local MVP to ISO/IEC 42001:2023 management-system themes and ISO/IEC 5338:2023 lifecycle practices. It is an alignment demonstrator only—not ISO certification or a full compliance claim.
+Administrators and the dedicated **CAIO** demo account can open **AI Governance** to review Sentinel's evidence-backed lifecycle controls. CAIO browser access is restricted to governance and system status; it has no browser clinical or administrative controls. The page maps the local MVP to ISO/IEC 42001:2023 management-system themes and ISO/IEC 5338:2023 lifecycle practices. It is an alignment demonstrator only—not ISO certification or a full compliance claim.
 
-The future LLM-assisted Sentinel Agent is in scope, but no provider or model is configured in this build. The dashboard records the permitted and prohibited LLM inputs, mandatory structured-output validation and deterministic fallback, clinician-review boundary, live local evidence, known gaps, and an administrator's 30-day governance-review attestation. LLM activation remains blocked until its provider/model identity, synthetic-only evaluation, telemetry, validation, and safety acceptance evidence are implemented.
+The future LLM-assisted Sentinel Agent is in scope, but no provider or model is configured in this build. The dashboard records the permitted and prohibited LLM inputs, mandatory structured-output validation and deterministic fallback, clinician-review boundary, live local evidence, known gaps, and a 30-day governance-review attestation. It also reports aggregate external-agent activity: five-minute successful-key activity and separate five-minute simulated demo sessions. Neither metric is a persistent connection count and neither exposes key, user or patient data. LLM activation remains blocked until its provider/model identity, synthetic-only evaluation, telemetry, validation, and safety acceptance evidence are implemented.
 
 ## Local blockchain demo
 
@@ -120,12 +121,12 @@ The FHIR endpoints have automated coverage for round trips, duplicate idempotenc
 
 ## Cloud release contract
 
-1. Run Supabase migrations and RLS tests; do not expose direct table access to browser clients.
-2. Deploy the API and worker as separate Render services with server-only database and Sepolia credentials.
-3. Deploy the contract to Sepolia with a dedicated test wallet.
-4. Push the secret-scanned repository to **MIT Hackathon DM**.
-5. Publish `frontend/dist` privately to Sites. If that fails, deploy the identical static frontend to a protected Vercel project.
+1. Request a new Aura Intelligence / Singapore Supabase project cost quote. Create the project only after it is confirmed as **$0** and the user confirms the quote. Apply every migration, seed the exact 100 synthetic profiles, and run the RLS-denial test. The browser never receives a Supabase URL, publishable key, service key or database URL.
+2. Push the secret-scanned repository to **MIT Hackathon DM**. Configure one Free Render web service from `render.yaml`, with the FastAPI API and protected `/mcp` listener in the same process. Store `DATABASE_URL`, `APP_SECRET`, `SCHEDULER_TRIGGER_TOKEN`, MCP host/origin values and optional chain values in Render only.
+3. The Free Render design deliberately does not deploy a background worker. Set `SCHEDULE_ENABLED=true` and `SCHEDULER_MODE=github_actions`; then enable the repository variable `SENTINEL_SCHEDULER_ENABLED=true` and configure `SENTINEL_API_URL` plus `SENTINEL_SCHEDULER_TOKEN` as GitHub Actions secrets. The included workflow calls the authenticated scan trigger daily at **02:00 Asia/Kuala_Lumpur**. Manual Scan Now remains available. Free web-service sleep and scheduler limitations remain visible in System Status.
+4. Before the static build, set `VITE_API_BASE_URL` to the HTTPS Render API URL plus `/api`; unlike Vite development mode, production has no proxy. Build the frontend and publish `frontend/dist` privately to Sites. If Sites fails, deploy the identical static frontend to a protected Vercel project.
+5. Smoke-test private Sites login, CAIO governance, MCP `/mcp`, scheduler authentication, Supabase RLS, and synthetic data counts. Test GrokBot first with a short-lived `status:read` CAIO key, observe its activity, then revoke it and verify denial.
 
-Before the static build, set `VITE_API_BASE_URL` to the HTTPS Render API URL plus `/api`; unlike Vite development mode, production has no proxy.
+Render Free services can sleep and do not supply a free background-worker plan, so this is a demonstrable hackathon deployment rather than a production scheduler. See [Render Free limits](https://render.com/docs/free).
 
 See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the five-minute walkthrough.

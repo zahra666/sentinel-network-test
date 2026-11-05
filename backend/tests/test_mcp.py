@@ -32,8 +32,9 @@ def access(monkeypatch):
         db.add_all([org, other]); db.flush()
         admin = User(email="admin@test.demo", password_hash="unused", role="administrator")
         clinician = User(email="clinician@test.demo", password_hash="unused", role="clinician", organization_id=org.id)
+        caio = User(email="caio@test.demo", password_hash="unused", role="caio")
         researcher = User(email="researcher@test.demo", password_hash="unused", role="researcher")
-        db.add_all([admin, clinician, researcher]); db.flush()
+        db.add_all([admin, clinician, caio, researcher]); db.flush()
         patients = [Patient(reference=f"SYN-{i}", organization_id=o.id, care_setting="Outpatient Clinic", age_group="45-64")
                     for i, o in enumerate([org, org, other])]
         db.add_all(patients); db.flush()
@@ -49,10 +50,10 @@ def access(monkeypatch):
     admin_headers = {"Authorization": f"Bearer {create_token(admin)}"}
 
     def issue(**overrides):
-        payload = {"name": "Test agent", "purpose": "Synthetic test", "user_id": clinician.id, **overrides}
+        payload = {"name": "Test agent", "purpose": "Synthetic test", "user_id": clinician.id, "scopes": ["status:read"], **overrides}
         return client.post("/api/mcp/keys", json=payload, headers=admin_headers)
 
-    yield SimpleNamespace(factory=factory, client=client, issue=issue, admin=admin, clinician=clinician,
+    yield SimpleNamespace(factory=factory, client=client, issue=issue, admin=admin, caio=caio, clinician=clinician,
                           researcher=researcher, patients=patients, headers=admin_headers)
     app.dependency_overrides.pop(get_db, None)
     client.close()
@@ -97,18 +98,19 @@ def test_status_key_cannot_read_any_patient_or_arbitrary_tool(access):
         assert "demo_lab" not in response.text
 
 
-def test_explicit_patient_approval_and_hospital_isolation(access):
-    issued = access.issue(scopes=["patient:read"], patient_ids=[access.patients[0].id])
+def test_organisation_scoped_clinician_access_and_hospital_isolation(access):
+    issued = access.issue(scopes=["clinical:read:organisation"])
     token = issued.json()["api_key"]
     allowed = rpc(token, "tools/call", {"name": "patient_record", "arguments": {"patient_id": access.patients[0].id}})
     assert not allowed.json()["result"].get("isError")
     assert "demo_lab" in allowed.text
-    for patient in access.patients[1:]:
-        denied = rpc(token, "tools/call", {"name": "patient_record", "arguments": {"patient_id": patient.id}})
-        assert denied.json()["result"]["isError"]
-        assert patient.reference not in denied.text
-    assert access.issue(scopes=["patient:read"], patient_ids=[access.patients[2].id]).status_code == 400
-    # Even an obsolete approval cannot override a changed hospital assignment.
+    same_organisation = rpc(token, "tools/call", {"name": "patient_record", "arguments": {"patient_id": access.patients[1].id}})
+    assert not same_organisation.json()["result"].get("isError")
+    denied = rpc(token, "tools/call", {"name": "patient_record", "arguments": {"patient_id": access.patients[2].id}})
+    assert denied.json()["result"]["isError"]
+    assert access.patients[2].reference not in denied.text
+    assert access.issue(scopes=["clinical:read:system"]).status_code == 400
+    # A changed hospital assignment takes effect at every read.
     with access.factory() as db:
         owner = db.get(User, access.clinician.id)
         owner.organization_id = access.patients[2].organization_id
@@ -116,9 +118,47 @@ def test_explicit_patient_approval_and_hospital_isolation(access):
     assert rpc(token, "tools/call", {"name": "patient_record", "arguments": {"patient_id": access.patients[0].id}}).json()["result"]["isError"]
 
 
+def test_useful_clinician_read_tools_are_bounded(access):
+    token = access.issue(scopes=["status:read", "clinical:read:organisation"]).json()["api_key"]
+    lookup = rpc(token, "tools/call", {"name": "patient_reference_lookup", "arguments": {"patient_reference": access.patients[0].reference}})
+    assert not lookup.json()["result"].get("isError")
+    assert access.patients[0].reference in lookup.text
+    assert access.patients[2].reference not in lookup.text
+    assert "cannot list" in lookup.text
+    review = rpc(token, "tools/call", {"name": "patient_review_evidence", "arguments": {"patient_id": access.patients[0].id}})
+    assert not review.json()["result"].get("isError")
+    fhir = rpc(token, "tools/call", {"name": "patient_fhir_r4_bundle", "arguments": {"patient_id": access.patients[0].id}})
+    assert not fhir.json()["result"].get("isError")
+    catalogue = rpc(token, "tools/call", {"name": "terminology_catalogue", "arguments": {}})
+    assert not catalogue.json()["result"].get("isError")
+    assert "4548-4" in catalogue.text
+    assert rpc(token, "tools/call", {"name": "patient_reference_lookup", "arguments": {"patient_reference": access.patients[2].reference}}).json()["result"]["isError"]
+
+
+def test_caio_has_system_synthetic_read_but_no_write_or_key_control(access):
+    issued = access.issue(
+        user_id=access.caio.id,
+        scopes=["status:read", "clinical:read:system", "governance:read", "research:aggregate"],
+    )
+    token = issued.json()["api_key"]
+    cross_hospital = rpc(token, "tools/call", {"name": "patient_record", "arguments": {"patient_id": access.patients[2].id}})
+    assert not cross_hospital.json()["result"].get("isError")
+    governance = rpc(token, "tools/call", {"name": "governance_summary", "arguments": {}})
+    assert not governance.json()["result"].get("isError")
+    assert "token_hash" not in governance.text and issued["api_key"] not in governance.text
+    activity = rpc(token, "tools/call", {"name": "mcp_activity", "arguments": {}})
+    assert not activity.json()["result"].get("isError")
+    denied = rpc(token, "tools/call", {"name": "approve_key", "arguments": {}})
+    assert denied.json()["result"]["isError"]
+    caio_headers = {"Authorization": f"Bearer {create_token(access.caio)}"}
+    assert access.client.get("/api/governance", headers=caio_headers).status_code == 200
+    assert access.client.get("/api/patients", headers=caio_headers).status_code == 403
+    assert access.client.post("/api/mcp/keys", json={"name": "no", "purpose": "no", "user_id": access.caio.id, "scopes": ["status:read"]}, headers=caio_headers).status_code == 403
+
+
 @pytest.mark.parametrize("change", ["expired", "revoked", "inactive", "approver_demoted", "role_changed"])
 def test_access_changes_take_effect_immediately(access, change):
-    issued = access.issue(scopes=["patient:read"], patient_ids=[access.patients[0].id]).json()
+    issued = access.issue(scopes=["clinical:read:organisation"]).json()
     with access.factory() as db:
         key = db.get(AgentAccessKey, issued["id"])
         if change == "expired":
@@ -138,8 +178,8 @@ def test_access_changes_take_effect_immediately(access, change):
 
 
 def test_approval_restrictions_and_key_secrecy(access):
-    assert access.issue(scopes=["patient:read"]).status_code == 400
-    assert access.issue(user_id=access.researcher.id, scopes=["patient:read"], patient_ids=[access.patients[0].id]).status_code == 400
+    assert access.issue(scopes=["clinical:read:system"]).status_code == 400
+    assert access.issue(user_id=access.researcher.id, scopes=["clinical:read:organisation"]).status_code == 400
     assert access.issue(expires_in_minutes=1441).status_code == 422
     token = access.issue().json()["api_key"]
     listing = access.client.get("/api/mcp/keys", headers=access.headers)
@@ -170,7 +210,7 @@ def test_disabled_origin_host_and_audit(access, monkeypatch):
 
 
 def test_official_mcp_client_handshake_and_reads(access):
-    token = access.issue(scopes=["status:read", "patient:read"], patient_ids=[access.patients[0].id]).json()["api_key"]
+    token = access.issue(scopes=["status:read", "clinical:read:organisation"]).json()["api_key"]
 
     async def run():
         listener = fresh_listener()
@@ -182,11 +222,11 @@ def test_official_mcp_client_handshake_and_reads(access):
                         initialized = await session.initialize()
                         assert initialized.serverInfo.name == "Sentinel Network"
                         tools = await session.list_tools()
-                        assert {tool.name for tool in tools.tools} == {"service_status", "patient_record"}
+                        assert {tool.name for tool in tools.tools} == {"service_status", "patient_record", "patient_reference_lookup", "patient_fhir_r4_bundle", "patient_review_evidence", "review_queue", "terminology_catalogue", "integrity_status", "governance_summary", "mcp_activity", "regional_aggregate"}
                         status = await session.call_tool("service_status", {})
                         assert not status.isError
                         patient = await session.call_tool("patient_record", {"patient_id": access.patients[0].id})
                         assert not patient.isError
-                        denied = await session.call_tool("patient_record", {"patient_id": access.patients[1].id})
+                        denied = await session.call_tool("patient_record", {"patient_id": access.patients[2].id})
                         assert denied.isError
     asyncio.run(run())

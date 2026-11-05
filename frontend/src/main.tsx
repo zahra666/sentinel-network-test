@@ -36,8 +36,19 @@ function App() {
     if (!token) return;
     try {
       setLoading(true); setError("");
-      const [me, summary] = await Promise.all([api("/auth/me", token), api("/overview", token)]);
-      setUser(me); setOverview(summary);
+      const me = await api("/auth/me", token);
+      setUser(me);
+      if (me.role === "caio") {
+        setOverview(null);
+        if (!["governance", "status"].includes(page)) setPage("governance");
+        return;
+      }
+      if (me.role === "researcher") {
+        setOverview(null);
+        if (!["regional", "ledger", "status"].includes(page)) setPage("regional");
+        return;
+      }
+      setOverview(await api("/overview", token));
       if (["patients", "guideline"].includes(page)) setPatients(await api("/patients", token));
       if (page === "alerts") setAlerts(await api("/alerts", token));
     } catch (err: any) { setError(err.message); if (String(err.message).includes("token")) setToken(""); }
@@ -48,7 +59,12 @@ function App() {
   useEffect(() => { if (token) localStorage.setItem("sentinel-token", token); else localStorage.removeItem("sentinel-token"); }, [token]);
 
   if (!token) return <Login onLogin={(data) => { setToken(data.access_token); setUser(data.user); }} />;
-  const visibleNav = nav.filter(([id]) => id !== "governance" || user?.role === "administrator");
+  const governanceRole = user?.role === "administrator" || user?.role === "caio";
+  const visibleNav = nav.filter(([id]) => {
+    if (user?.role === "caio") return ["governance", "status"].includes(id);
+    if (user?.role === "researcher") return ["regional", "ledger", "status"].includes(id);
+    return id !== "governance" || governanceRole;
+  });
   const content = {
     overview: <Overview data={overview} onRun={async () => { await api("/scans/run", token, { method: "POST" }); await refresh(); }} />,
     patients: <Patients patients={patients} token={token} />,
@@ -57,7 +73,7 @@ function App() {
     agent: <AgentConsole token={token} />,
     regional: <Regional token={token} />,
     ledger: <Ledger token={token} isAdministrator={user?.role === "administrator"} />,
-    governance: user?.role === "administrator" ? <Governance token={token} /> : <Empty label="AI Governance is available only to administrators." />,
+    governance: governanceRole ? <Governance token={token} /> : <Empty label="AI Governance is available only to administrators and CAIO reviewers." />,
     status: <Status token={token} />,
   }[page];
   return <div className="app-shell">
@@ -102,20 +118,25 @@ function Governance({ token }: { token: string }) {
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [simulationBusy, setSimulationBusy] = useState(false);
   const load = async () => { try { setError(""); setData(await api("/governance", token)); } catch (err: any) { setError(err.message); } };
   useEffect(() => { load(); }, [token]);
   const recordReview = async (event: FormEvent) => { event.preventDefault(); try { setBusy(true); setError(""); setData(await api("/governance/reviews", token, { method: "POST", body: JSON.stringify({ note: note.trim() || null }) })); setNote(""); } catch (err: any) { setError(err.message); } finally { setBusy(false); } };
+  const runMcpSimulation = async () => { try { setSimulationBusy(true); setError(""); const response = await api("/governance/mcp-demo-sessions", token, { method: "POST", body: JSON.stringify({ label: "Synthetic external agent" }) }); setData(response.dashboard); } catch (err: any) { setError(err.message); } finally { setSimulationBusy(false); } };
   const lifecycle: RecordValue[] = data?.lifecycle || [];
   const llm: RecordValue = data?.llm_profile || {};
   const review: RecordValue | null = data?.latest_review || null;
+  const mcp: RecordValue = data?.live_evidence?.mcp_activity || {};
   return <section className="governance-layout">
     <section className="governance-intro"><div><p className="eyebrow">AI GOVERNANCE LIFECYCLE</p><h2>Evidence-backed controls for a future LLM-assisted system.</h2><p>{data?.framework?.claim || "Loading framework status…"}</p></div><span className="governance-status planned">LLM {llm.integration_status || "checking"}</span></section>
     {error && <div className="error">{error}</div>}
-    {!data ? <div className="loading">Loading administrator governance evidence…</div> : <>
-      <section className="governance-metric-grid"><GovMetric label="Framework" value={data.framework.primary} detail={data.framework.lifecycle_companion}/><GovMetric label="LLM runtime" value={data.live_evidence.llm_runtime.status} detail="No provider or model connected"/><GovMetric label="Review cycle" value={`${data.review_interval_days} days`} detail={review ? `Next due ${governanceTime(review.next_review_due)}` : "Governance review required"}/><GovMetric label="Human oversight" value={`${data.live_evidence.alert_counts.new} open`} detail="Clinician review queue"/></section>
+    {!data ? <div className="loading">Loading CAIO governance evidence…</div> : <>
+      <section className="governance-metric-grid"><GovMetric label="Framework" value={data.framework.primary} detail={data.framework.lifecycle_companion}/><GovMetric label="LLM runtime" value={data.live_evidence.llm_runtime.status} detail="No provider or model connected"/><GovMetric label="Review cycle" value={`${data.review_interval_days} days`} detail={review ? `Next due ${governanceTime(review.next_review_due)}` : "Governance review required"}/><GovMetric label="Observed MCP agents" value={`${mcp.observed_agents_last_five_minutes ?? 0}`} detail="Approved keys active in last 5 minutes"/></section>
       <section className="governance-section"><div className="governance-section-heading"><div><p className="eyebrow">PLAN · DO · CHECK · ACT</p><h3>Lifecycle control evidence</h3></div><p>Statuses describe this MVP’s actual controls—not certification.</p></div><div className="lifecycle-grid">{lifecycle.map((stage) => <article className="lifecycle-card" key={stage.id}><div className="lifecycle-card-heading"><span className="governance-phase">{stage.phase}</span><span className={`governance-status ${stage.status}`}>{stage.status}</span></div><h4>{stage.name}</h4><p>{stage.summary}</p><dl>{stage.evidence.map((item: RecordValue) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl></article>)}</div></section>
       <section className="governance-two-column"><article className="governance-card llm-profile"><div className="governance-section-heading"><div><p className="eyebrow">LLM AGENT PROFILE</p><h3>{llm.component_name}</h3></div><span className="governance-status planned">{llm.integration_status} / not configured</span></div><p className="governance-muted">The future LLM may assist with authorised synthetic evidence and role-scoped tasks. Deterministic rules remain the clinical trigger.</p><GovernanceList title="Permitted inputs" items={llm.permitted_inputs}/><GovernanceList title="Prohibited inputs and actions" items={llm.prohibited_inputs}/><GovernanceList title="Required safeguards" items={llm.required_controls}/><div className="activation-note"><b>Before activation</b><span>{llm.activation_requirements?.join(" ")}</span></div></article><article className="governance-card"><div className="governance-section-heading"><div><p className="eyebrow">RISK & CONTROL REGISTER</p><h3>Known MVP risks</h3></div></div><div className="risk-list">{data.risk_controls.map((item: RecordValue) => <article key={item.id}><div><span className={`governance-status ${item.status}`}>{item.status}</span><h4>{item.risk}</h4></div><ul>{item.controls.map((control: string) => <li key={control}>{control}</li>)}</ul></article>)}</div></article></section>
       <section className="governance-two-column"><article className="governance-card"><div className="governance-section-heading"><div><p className="eyebrow">LIVE LOCAL EVIDENCE</p><h3>Operational state</h3></div></div><dl className="live-evidence"><div><dt>Latest scan</dt><dd>{data.live_evidence.latest_scan?.status || "not run"}</dd></div><div><dt>Source integrity</dt><dd>{data.live_evidence.source_batch.receipt_status}</dd></div><div><dt>Scheduler</dt><dd>{data.live_evidence.scheduler.enabled ? "enabled" : "manual / disabled"} · {data.live_evidence.scheduler.timezone}</dd></div><div><dt>Recent audit events</dt><dd>{data.live_evidence.recent_audit_events.length}</dd></div></dl><div className="audit-mini-list">{data.live_evidence.recent_audit_events.map((item: RecordValue, index: number) => <p key={`${item.event_type}-${index}`}><b>{item.event_type}</b><span>{governanceTime(item.created_at)}</span></p>)}</div></article><article className="governance-card governance-review"><div className="governance-section-heading"><div><p className="eyebrow">CONTINUAL IMPROVEMENT</p><h3>Administrative governance review</h3></div><span className={`governance-status ${review?.status === "overdue" ? "partial" : "implemented"}`}>{review?.status || "review required"}</span></div><p className="governance-muted">Record an evidence snapshot every 30 days. This attestation is an audit record, not a certification.</p>{review && <div className="review-summary"><b>Last reviewed by {review.reviewed_by}</b><span>{governanceTime(review.reviewed_at)} · next due {governanceTime(review.next_review_due)}</span>{review.note && <p>{review.note}</p>}</div>}<form onSubmit={recordReview}><label>Optional review note<textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Record a concise governance observation or follow-up."/></label><button className="primary" disabled={busy}>{busy ? "Recording…" : "Record governance review"}</button></form></article></section>
+      <section className="governance-two-column"><article className="governance-card"><div className="governance-section-heading"><div><p className="eyebrow">LIVE LOCAL EVIDENCE</p><h3>Operational state</h3></div></div><dl className="live-evidence"><div><dt>Latest scan</dt><dd>{data.live_evidence.latest_scan?.status || "not run"}</dd></div><div><dt>Source integrity</dt><dd>{data.live_evidence.source_batch.receipt_status}</dd></div><div><dt>Scheduler</dt><dd>{data.live_evidence.scheduler.enabled ? data.live_evidence.scheduler.mode || "enabled" : "manual / disabled"} · {data.live_evidence.scheduler.timezone}</dd></div><div><dt>Recent audit events</dt><dd>{data.live_evidence.recent_audit_events.length}</dd></div></dl><div className="audit-mini-list">{data.live_evidence.recent_audit_events.map((item: RecordValue, index: number) => <p key={`${item.event_type}-${index}`}><b>{item.event_type}</b><span>{governanceTime(item.created_at)}</span></p>)}</div></article><article className="governance-card governance-review"><div className="governance-section-heading"><div><p className="eyebrow">CONTINUAL IMPROVEMENT</p><h3>CAIO governance review</h3></div><span className={`governance-status ${review?.status === "overdue" ? "partial" : "implemented"}`}>{review?.status || "review required"}</span></div><p className="governance-muted">Record an evidence snapshot every 30 days. This attestation is an audit record, not a certification.</p>{review && <div className="review-summary"><b>Last reviewed by {review.reviewed_by}</b><span>{governanceTime(review.reviewed_at)} · next due {governanceTime(review.next_review_due)}</span>{review.note && <p>{review.note}</p>}</div>}<form onSubmit={recordReview}><label>Optional review note<textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Record a concise governance observation or follow-up."/></label><button className="primary" disabled={busy}>{busy ? "Recording…" : "Record governance review"}</button></form></article></section>
+      <section className="governance-card mcp-activity-card"><div className="governance-section-heading"><div><p className="eyebrow">EXTERNAL AGENT CONNECTIONS</p><h3>Protected MCP activity</h3></div><span className="governance-status implemented">read-only</span></div><p className="governance-muted">{mcp.definition}</p><dl className="live-evidence"><div><dt>Observed approved agents · 5 min</dt><dd>{mcp.observed_agents_last_five_minutes ?? 0}</dd></div><div><dt>Active simulated sessions</dt><dd>{mcp.active_simulated_sessions ?? 0}</dd></div><div><dt>Active / revoked / expired keys</dt><dd>{mcp.active_keys ?? 0} / {mcp.revoked_keys ?? 0} / {mcp.expired_keys ?? 0}</dd></div><div><dt>Allowed / denied calls · 24 hr</dt><dd>{mcp.allowed_calls_last_24_hours ?? 0} / {mcp.denied_calls_last_24_hours ?? 0}</dd></div></dl><p className="governance-muted">{mcp.simulation_definition}</p><button className="secondary" disabled={simulationBusy} onClick={runMcpSimulation}>{simulationBusy ? "Starting simulation…" : "Run 5-minute MCP simulation"}</button></section>
       <section className="governance-gaps"><p className="eyebrow">CURRENT GAPS</p><ul>{data.current_gaps.map((gap: string) => <li key={gap}>{gap}</li>)}</ul></section>
     </>}
   </section>;

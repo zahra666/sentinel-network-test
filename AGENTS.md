@@ -22,3 +22,11 @@ This file supplements `MIT-agents.md`. The stricter instruction applies. The pro
 - Test FHIR R4 import/export round trips, invalid resources, patient-reference resolution, duplicate idempotency, terminology ambiguity, unsupported units/conversions, corrected-result provenance/reprocessing, and access controls on every FHIR route.
 - Update the Supabase migration/RLS-denial test when schema changes. Preserve the browser-to-FastAPI-only access model.
 - Update README with the subset, catalogue, limitations, source links, and safe sample commands. Keep test results and unverified cloud work clearly separated.
+
+## CAIO governance and external MCP boundary
+
+- `caio` is a synthetic-demo governance role. Its browser access is limited to governance and system status; it has no browser clinical, administrative, key-issuance, import, chain-write, or referral capability.
+- MCP tools are read-only and must stay bounded. Clinician keys may read supported evidence only in the clinician's own organisation. CAIO keys may read supported synthetic records across organisations, but MCP must never provide bulk database export, shell/filesystem, arbitrary SQL, credential, data-import, patient-contact, prescribing, triage, referral, chain-write, or other state-changing tools.
+- The CAIO system-wide scope exists only for the supplied synthetic hackathon dataset. It must remain explicitly labelled and must not be reused as a production authorisation model.
+- MCP access keys are administrator-approved, hashed, short-lived, auditable and immediately revocable. Dashboard login tokens are never MCP keys.
+- Governance may report only aggregate MCP activity. A stateless HTTP call is not a persistent connection; show observed rolling activity and simulated demo sessions as separate, plainly labelled metrics without keys, identities, or patient content.

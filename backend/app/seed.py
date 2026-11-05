@@ -28,6 +28,7 @@ def seed() -> None:
         db.flush()
         users = [
             User(email="admin@sentinel.demo", password_hash=hash_password(PASSWORD), role="administrator"),
+            User(email="caio@sentinel.demo", password_hash=hash_password(PASSWORD), role="caio"),
             User(email="clinician.aster@sentinel.demo", password_hash=hash_password(PASSWORD), role="clinician", organization_id=organisations[0].id),
             User(email="clinician.beryl@sentinel.demo", password_hash=hash_password(PASSWORD), role="clinician", organization_id=organisations[1].id),
             User(email="clinician.cobalt@sentinel.demo", password_hash=hash_password(PASSWORD), role="clinician", organization_id=organisations[2].id),
@@ -36,7 +37,7 @@ def seed() -> None:
         ]
         db.add_all(users)
         db.flush()
-        db.add(ResearchGrant(user_id=users[4].id, organization_id=None, purpose="Synthetic regional surveillance demonstration", scope="fixed-district-rate", expires_at=ANCHOR + timedelta(days=365)))
+        db.add(ResearchGrant(user_id=users[5].id, organization_id=None, purpose="Synthetic regional surveillance demonstration", scope="fixed-district-rate", expires_at=ANCHOR + timedelta(days=365)))
 
         care_matrix = [(0, "Outpatient Clinic", 15), (0, "Medical Ward", 8), (0, "Surgical Ward", 7), (0, "O&G Ward", 4), (1, "Outpatient Clinic", 15), (1, "Medical Ward", 9), (1, "Surgical Ward", 5), (1, "O&G Ward", 4), (2, "Outpatient Clinic", 15), (2, "Medical Ward", 8), (2, "Surgical Ward", 6), (2, "O&G Ward", 4)]
         patients: list[Patient] = []

@@ -6,9 +6,11 @@
 - [x] Build the React dashboard against live API responses.
 - [x] Validate the local Hardhat contract and integrity flow.
 - [x] Add Supabase migrations, RLS tests, GitHub CI, and deployment manifests.
-- [ ] Verify a private static publish, with Vercel fallback only if needed.
-- [x] Implement the separate read-only MCP listener, hashed expiring/revocable keys, exact-patient approval, hospital isolation, access audits, and official MCP client tests (18 backend tests passed).
-- [ ] Configure HTTPS routing and verify an off-machine MCP client; cloud migration/RLS remains unverified for the new key table.
+- [ ] Verify a private static Sites publish, with protected Vercel fallback only if Sites cannot publish.
+- [x] Expand the read-only MCP surface for clinician organisation-scoped and CAIO synthetic system-read profiles; add FHIR, evidence, review-queue, terminology, integrity, governance and aggregate tools, with hashed expiring/revocable keys and audits.
+- [x] Add CAIO-only governance/dashboard access, aggregate MCP activity telemetry, and explicitly labelled five-minute simulation sessions.
+- [ ] Obtain and confirm a $0 Supabase project quote, then run the cloud migration/seed/RLS verification and configure the Free Render combined API/MCP service plus GitHub scheduler.
+- [ ] Configure HTTPS routing and verify an off-machine GrokBot MCP client using a short-lived key; standalone MCP extraction remains a later handoff.
 - [x] Deliver a bounded HL7 FHIR R4 interoperability vertical slice over the existing SQL model: authenticated patient-scoped import/export for Patient, Observation, Condition, and DiagnosticReport; no claim of full FHIR conformance.
 - [x] Add a verified diabetes-demo terminology catalogue (LOINC, UCUM, and a small SNOMED CT subset), original-code/value provenance, corrected-result reprocessing, code/unit-gated evidence rules, migrations, and access-control round-trip tests. Remote Supabase RLS execution remains pending.
 - [x] Surface readable coded observations in the clinical UI and document the supported FHIR subset, conversion limits, terminology licensing limits, and sample requests.

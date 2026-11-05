@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .config import get_settings
-from .models import Alert, AuditEvent, GovernanceReview, Scan, SourceBatch, User
+from .models import AgentAccessKey, Alert, AuditEvent, GovernanceReview, McpDemoSession, Scan, SourceBatch, User
 
 GOVERNANCE_VERSION = "sentinel-governance-v1"
 REVIEW_INTERVAL_DAYS = 30
@@ -127,11 +127,63 @@ def _serialize_review(review: GovernanceReview | None, db: Session) -> dict | No
     return {
         "id": review.id,
         "reviewed_at": reviewed_at.isoformat(),
-        "reviewed_by": actor.email if actor else "unknown administrator",
+        "reviewed_by": actor.email if actor else "unknown governance reviewer",
         "note": review.note,
         "next_review_due": next_due.isoformat(),
         "status": "overdue" if datetime.now(timezone.utc) > next_due else "not_due",
         "evidence_snapshot": review.evidence_snapshot,
+    }
+
+
+def mcp_activity_summary(db: Session) -> dict:
+    """Return only aggregate, non-identifying MCP telemetry for governance."""
+    now = datetime.now(timezone.utc)
+    recent_cutoff = now - timedelta(minutes=5)
+    daily_cutoff = now - timedelta(hours=24)
+    recent_agent_count = db.scalar(
+        select(func.count(func.distinct(AuditEvent.entity_id))).where(
+            AuditEvent.event_type == "mcp.tool_allowed", AuditEvent.created_at >= recent_cutoff
+        )
+    ) or 0
+    active_key_count = db.scalar(
+        select(func.count()).select_from(AgentAccessKey).where(
+            AgentAccessKey.revoked_at.is_(None), AgentAccessKey.expires_at > now
+        )
+    ) or 0
+    revoked_key_count = db.scalar(
+        select(func.count()).select_from(AgentAccessKey).where(AgentAccessKey.revoked_at.is_not(None))
+    ) or 0
+    expired_key_count = db.scalar(
+        select(func.count()).select_from(AgentAccessKey).where(
+            AgentAccessKey.revoked_at.is_(None), AgentAccessKey.expires_at <= now
+        )
+    ) or 0
+    active_simulation_count = db.scalar(
+        select(func.count()).select_from(McpDemoSession).where(
+            McpDemoSession.ended_at.is_(None), McpDemoSession.expires_at > now
+        )
+    ) or 0
+    allowed_calls = db.scalar(
+        select(func.count()).select_from(AuditEvent).where(
+            AuditEvent.event_type == "mcp.tool_allowed", AuditEvent.created_at >= daily_cutoff
+        )
+    ) or 0
+    denied_calls = db.scalar(
+        select(func.count()).select_from(AuditEvent).where(
+            AuditEvent.event_type.in_(("mcp.tool_denied", "mcp.authentication_denied")),
+            AuditEvent.created_at >= daily_cutoff,
+        )
+    ) or 0
+    return {
+        "observed_agents_last_five_minutes": recent_agent_count,
+        "active_simulated_sessions": active_simulation_count,
+        "active_keys": active_key_count,
+        "revoked_keys": revoked_key_count,
+        "expired_keys": expired_key_count,
+        "allowed_calls_last_24_hours": allowed_calls,
+        "denied_calls_last_24_hours": denied_calls,
+        "definition": "Observed agents are distinct approved keys with successful stateless MCP calls in the previous five minutes; they are not persistent network connections.",
+        "simulation_definition": "Simulated sessions are time-bounded governance-demo records and never invoke clinical MCP tools.",
     }
 
 
@@ -250,6 +302,7 @@ def build_governance_dashboard(db: Session) -> dict:
             "source_batch": {"status": source_batch_state, "receipt_status": batch.receipt_status if batch else "unavailable", "created_at": batch.created_at.isoformat() if batch else None},
             "scheduler": {"enabled": settings.schedule_enabled, "timezone": settings.schedule_timezone},
             "llm_runtime": {"configured": False, "status": "planned / not configured"},
+            "mcp_activity": mcp_activity_summary(db),
             "recent_audit_events": [{"event_type": event.event_type, "entity_type": event.entity_type, "created_at": event.created_at.isoformat()} for event in latest_audit],
         },
         "current_gaps": [

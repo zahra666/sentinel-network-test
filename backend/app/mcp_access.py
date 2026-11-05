@@ -12,11 +12,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .db import get_db
-from .models import AgentAccessKey, AuditEvent, Patient, User
+from .models import AgentAccessKey, AuditEvent, User
 from .security import require_roles
 
 router = APIRouter(prefix="/api/mcp/keys", tags=["MCP access — administrator approval"])
 admin_only = require_roles("administrator")
+
+MCP_SCOPES = {
+    "clinician": {"status:read", "clinical:read:organisation"},
+    "caio": {"status:read", "clinical:read:system", "governance:read", "research:aggregate"},
+}
 
 
 class KeyApproval(BaseModel):
@@ -24,8 +29,8 @@ class KeyApproval(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     purpose: str = Field(min_length=1, max_length=240)
     user_id: str
-    scopes: list[Literal["status:read", "patient:read"]] = Field(default_factory=lambda: ["status:read"], min_length=1, max_length=2)
-    patient_ids: list[str] = Field(default_factory=list, max_length=20)
+    scopes: list[Literal["status:read", "clinical:read:organisation", "clinical:read:system", "governance:read", "research:aggregate"]] = Field(min_length=1, max_length=4)
+    patient_ids: list[str] = Field(default_factory=list, max_length=0)
     expires_in_minutes: int = Field(default=60, ge=1, le=1440)
 
 
@@ -46,6 +51,8 @@ def valid_key(db: Session, key: AgentAccessKey | None) -> User:
     owner = db.get(User, key.user_id)
     if not owner or not owner.active:
         raise HTTPException(401, "Invalid or expired agent key")
+    if owner.role not in MCP_SCOPES or not set(key.scopes).issubset(MCP_SCOPES[owner.role]):
+        raise HTTPException(401, "Invalid or expired agent key")
     # Approval loses effect if the approving administrator is disabled or demoted.
     approver = db.get(User, key.approved_by)
     if not approver or not approver.active or approver.role != "administrator":
@@ -56,26 +63,22 @@ def valid_key(db: Session, key: AgentAccessKey | None) -> User:
 @router.post("")
 def approve_key(payload: KeyApproval, response: Response, admin: User = Depends(admin_only), db: Session = Depends(get_db)) -> dict:
     owner = db.get(User, payload.user_id)
-    if not owner or not owner.active:
-        raise HTTPException(400, "An active account is required")
-    if "patient:read" in payload.scopes:
-        if owner.role not in {"administrator", "clinician"} or not payload.patient_ids:
-            raise HTTPException(400, "Clinical role and explicit patient approval are required")
-        for patient_id in payload.patient_ids:
-            patient = db.get(Patient, patient_id)
-            if not patient or (owner.role == "clinician" and owner.organization_id != patient.organization_id):
-                raise HTTPException(400, "Patient approval exceeds the account's clinical access")
-    elif payload.patient_ids:
-        raise HTTPException(400, "Patient approval requires patient:read scope")
+    if not owner or not owner.active or owner.role not in MCP_SCOPES:
+        raise HTTPException(400, "An active clinician or CAIO account is required")
+    requested_scopes = set(payload.scopes)
+    if not requested_scopes.issubset(MCP_SCOPES[owner.role]):
+        raise HTTPException(400, "Requested scope exceeds the account's MCP access profile")
+    if payload.patient_ids:
+        raise HTTPException(400, "Patient lists are not accepted; access is governed by the approved role profile")
     secret = "snt_mcp_" + secrets.token_urlsafe(32)
     key = AgentAccessKey(token_hash=hashlib.sha256(secret.encode()).hexdigest(), name=payload.name,
                          purpose=payload.purpose, user_id=owner.id, approved_by=admin.id,
-                         scopes=sorted(set(payload.scopes)), patient_ids=sorted(set(payload.patient_ids)),
+                         scopes=sorted(requested_scopes), patient_ids=[],
                          expires_at=datetime.now(timezone.utc) + timedelta(minutes=payload.expires_in_minutes))
     db.add(key)
     db.flush()
     db.add(AuditEvent(actor_id=admin.id, event_type="mcp.key_approved", entity_type="agent_access_key", entity_id=key.id,
-                      detail={"scopes": key.scopes, "approved_patient_count": len(key.patient_ids)}))
+                      detail={"scopes": key.scopes, "access_profile": owner.role}))
     db.commit()
     response.headers["Cache-Control"] = "no-store"
     return {**key_metadata(key), "api_key": secret, "notice": "Copy now; this key cannot be retrieved again."}

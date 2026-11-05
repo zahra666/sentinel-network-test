@@ -53,6 +53,19 @@ class AgentAccessKey(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class McpDemoSession(Base):
+    """A transparent, time-bounded dashboard simulation; never an MCP credential."""
+
+    __tablename__ = "mcp_demo_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    label: Mapped[str] = mapped_column(String(80))
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Patient(Base):
     __tablename__ = "patients"
 

@@ -1,23 +1,24 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import hmac
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .agent import chat, enqueue_task, process_task
+from .agent import chat, enqueue_task, process_pending_tasks, process_task
 from .chain import ChainUnavailable, anchor_batch, anchor_research_grant, revoke_research_grant, verify_batch, verify_research_grant
 from .config import get_settings
 from .db import get_db, initialise_database
 from .fhir_r4 import FhirValidationError, condition_resource, everything_bundle, import_bundle, observation_resource, patient_resource, report_resource
 from .governance import build_governance_dashboard, review_snapshot
 from .guideline_tree import assessment
-from .models import AgentMessage, Alert, AuditEvent, Condition, DelegatedTask, DiagnosticReport, Finding, GovernanceReview, MdtReview, NotificationAttempt, Observation, Organization, Patient, ResearchGrant, Scan, SourceBatch, User
+from .models import AgentMessage, Alert, AuditEvent, Condition, DelegatedTask, DiagnosticReport, Finding, GovernanceReview, McpDemoSession, MdtReview, NotificationAttempt, Observation, Organization, Patient, ResearchGrant, Scan, SourceBatch, User
 from .mdt import run_three_member_mdt
 from .mcp_access import router as mcp_access_router
 from .security import create_token, current_user, require_roles, verify_password
@@ -62,6 +63,10 @@ class GovernanceReviewPayload(BaseModel):
     note: str | None = Field(default=None, max_length=1000)
 
 
+class McpDemoSessionPayload(BaseModel):
+    label: str = Field(default="Synthetic external agent", min_length=1, max_length=80, pattern=r"^[A-Za-z0-9 ._-]+$")
+
+
 class FhirImportPayload(BaseModel):
     bundle: dict
 
@@ -90,7 +95,7 @@ def me(user: User = Depends(current_user)) -> dict:
 
 
 @app.get("/api/overview")
-def overview(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+def overview(user: User = Depends(require_roles("administrator", "clinician")), db: Session = Depends(get_db)) -> dict:
     patient_query = select(Patient)
     if user.role == "clinician":
         patient_query = patient_query.where(Patient.organization_id == user.organization_id)
@@ -110,6 +115,26 @@ def run_scan_now(user: User = Depends(require_roles("administrator", "clinician"
     scan = execute_scan(db, trigger="manual", actor=user)
     db.commit()
     return serialize_scan(scan)
+
+
+@app.post("/api/internal/scheduled-scan")
+def scheduled_scan(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> dict:
+    """GitHub Actions trigger for the zero-cost hosted demo; never a browser route."""
+    settings = get_settings()
+    expected = f"Bearer {settings.scheduler_trigger_token}"
+    if not settings.schedule_enabled or not settings.scheduler_trigger_token or not authorization or not hmac.compare_digest(authorization, expected):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid scheduler trigger")
+    scan = execute_scan(db, trigger="github_schedule")
+    sentinel = advance_notification_workflows(db)
+    delegated = process_pending_tasks(db)
+    db.add(AuditEvent(
+        event_type="scheduler.github_triggered",
+        entity_type="scheduler",
+        entity_id="github-actions",
+        detail={"mode": settings.scheduler_mode, "sentinel": sentinel, "delegated_tasks": delegated},
+    ))
+    db.commit()
+    return {"status": "completed", "scan": serialize_scan(scan), "sentinel": sentinel, "delegated_tasks": delegated}
 
 
 def execute_scan(db: Session, trigger: str, actor: User | None = None) -> Scan:
@@ -450,16 +475,16 @@ def sentinel_tick(user: User = Depends(require_roles("administrator")), db: Sess
 def system_status(_user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     scan = db.scalar(select(Scan).order_by(Scan.finished_at.desc()))
     batch = db.scalar(select(SourceBatch).order_by(SourceBatch.created_at.desc()))
-    return {"data_label": "Synthetic data — demonstration only", "api": "healthy", "scheduler": {"timezone": get_settings().schedule_timezone, "enabled": get_settings().schedule_enabled, "last_scan": serialize_scan(scan) if scan else None}, "sentinel_agent": "in_app_notifications_and_review_queue_only", "chain": batch.receipt_status if batch else "unavailable", "summary_mode": "deterministic templates"}
+    return {"data_label": "Synthetic data — demonstration only", "api": "healthy", "scheduler": {"timezone": get_settings().schedule_timezone, "enabled": get_settings().schedule_enabled, "mode": get_settings().scheduler_mode, "last_scan": serialize_scan(scan) if scan else None}, "sentinel_agent": "in_app_notifications_and_review_queue_only", "chain": batch.receipt_status if batch else "unavailable", "summary_mode": "deterministic templates"}
 
 
 @app.get("/api/governance")
-def governance_dashboard(_user: User = Depends(require_roles("administrator")), db: Session = Depends(get_db)) -> dict:
+def governance_dashboard(_user: User = Depends(require_roles("administrator", "caio")), db: Session = Depends(get_db)) -> dict:
     return build_governance_dashboard(db)
 
 
 @app.post("/api/governance/reviews")
-def record_governance_review(payload: GovernanceReviewPayload, user: User = Depends(require_roles("administrator")), db: Session = Depends(get_db)) -> dict:
+def record_governance_review(payload: GovernanceReviewPayload, user: User = Depends(require_roles("administrator", "caio")), db: Session = Depends(get_db)) -> dict:
     dashboard = build_governance_dashboard(db)
     note = payload.note.strip() if payload.note else None
     review = GovernanceReview(actor_id=user.id, note=note or None, evidence_snapshot=review_snapshot(dashboard))
@@ -474,6 +499,27 @@ def record_governance_review(payload: GovernanceReviewPayload, user: User = Depe
     ))
     db.commit()
     return build_governance_dashboard(db)
+
+
+@app.post("/api/governance/mcp-demo-sessions")
+def start_mcp_demo_session(payload: McpDemoSessionPayload, user: User = Depends(require_roles("administrator", "caio")), db: Session = Depends(get_db)) -> dict:
+    """Create a visible simulation record only; it never creates a credential or calls an MCP tool."""
+    session = McpDemoSession(
+        label=payload.label.strip(),
+        created_by=user.id,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+    )
+    db.add(session)
+    db.flush()
+    db.add(AuditEvent(
+        actor_id=user.id,
+        event_type="mcp.demo_session_started",
+        entity_type="mcp_demo_session",
+        entity_id=session.id,
+        detail={"simulation": True, "expires_in_minutes": 5},
+    ))
+    db.commit()
+    return {"id": session.id, "status": "simulated", "expires_at": session.expires_at.isoformat(), "dashboard": build_governance_dashboard(db)}
 
 
 def authorised_patient(patient_id: str, user: User, db: Session) -> Patient:
@@ -539,3 +585,10 @@ def serialize_task(task: DelegatedTask) -> dict:
 
 def serialize_mdt_review(review: MdtReview) -> dict:
     return {"id": review.id, "patient_id": review.patient_id, "report": review.report, "selected_pathways": review.selected_pathways, "clinician_attested_at": review.clinician_attested_at.isoformat() if review.clinician_attested_at else None, "requires_clinician_attestation": True}
+
+
+# The mount is deliberately last: normal dashboard and API routes resolve first,
+# while the MCP ASGI app receives only its own /mcp request path.
+from .mcp_server import app as protected_mcp_app
+
+app.mount("/", protected_mcp_app, name="mcp")

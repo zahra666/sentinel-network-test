@@ -1,4 +1,6 @@
 import os
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_sentinel.db"
 os.environ["APP_SECRET"] = "test-secret"
@@ -12,10 +14,10 @@ from app.chain import verify_batch
 from app.db import Base, SessionLocal, engine, initialise_database
 from app.guideline_tree import assessment
 from app.governance import build_governance_dashboard
-from app.main import GovernanceReviewPayload, execute_scan, record_governance_review
+from app.main import GovernanceReviewPayload, McpDemoSessionPayload, execute_scan, record_governance_review, scheduled_scan, start_mcp_demo_session
 from app.mcp_access import KeyApproval, approve_key, revoke_key, valid_key
 from app.mdt import run_three_member_mdt
-from app.models import AgentAccessKey, AuditEvent, GovernanceReview, Observation, Patient, Scan, User
+from app.models import AgentAccessKey, AuditEvent, GovernanceReview, McpDemoSession, Observation, Patient, Scan, User
 from app.seed import seed
 from app.security import require_roles
 from app.services.sentinel_agent import advance_notification_workflows
@@ -83,16 +85,18 @@ def test_sentinel_reminders_are_idempotent_and_in_app_only():
         assert second == {"reminders": 0, "review_queue_escalations": 0}
 
 
-def test_governance_is_admin_only_and_records_review_evidence():
+def test_governance_is_caio_or_admin_only_and_records_review_evidence():
     with SessionLocal() as db:
         admin = db.scalar(select(User).where(User.email == "admin@sentinel.demo"))
+        caio = db.scalar(select(User).where(User.email == "caio@sentinel.demo"))
         clinician = db.scalar(select(User).where(User.email == "clinician.aster@sentinel.demo"))
         researcher = db.scalar(select(User).where(User.email == "researcher.approved@sentinel.demo"))
-        guard = require_roles("administrator")
+        guard = require_roles("administrator", "caio")
         with pytest.raises(HTTPException, match="Role is not authorised"):
             guard(clinician)
         with pytest.raises(HTTPException, match="Role is not authorised"):
             guard(researcher)
+        assert guard(caio).id == caio.id
 
         payload = build_governance_dashboard(db)
         assert payload["framework"]["primary"] == "ISO/IEC 42001:2023"
@@ -101,6 +105,8 @@ def test_governance_is_admin_only_and_records_review_evidence():
         assert "Structured output validation" in " ".join(payload["llm_profile"]["required_controls"])
         assert payload["live_evidence"]["llm_runtime"]["status"] == "planned / not configured"
         assert payload["live_evidence"]["source_batch"]["receipt_status"] in {"pending", "confirmed", "unavailable"}
+        assert payload["live_evidence"]["mcp_activity"]["observed_agents_last_five_minutes"] >= 0
+        assert "token" not in str(payload["live_evidence"]["mcp_activity"]).lower()
 
         recorded = record_governance_review(GovernanceReviewPayload(note="Synthetic governance review recorded for the demo."), admin, db)
         review = recorded["latest_review"]
@@ -118,24 +124,53 @@ def test_mcp_key_is_one_time_scoped_and_revocable():
     with SessionLocal() as db:
         admin = db.scalar(select(User).where(User.role == "administrator"))
         clinician = db.scalar(select(User).where(User.email == "clinician.aster@sentinel.demo"))
-        approved_patient = db.scalar(select(Patient).where(Patient.organization_id == clinician.organization_id))
         issued = approve_key(
-            KeyApproval(name="Synthetic reviewer", purpose="Read one synthetic evidence record", user_id=clinician.id,
-                        scopes=["status:read", "patient:read"], patient_ids=[approved_patient.id], expires_in_minutes=30),
+            KeyApproval(name="Synthetic reviewer", purpose="Read organisation-scoped synthetic evidence", user_id=clinician.id,
+                        scopes=["status:read", "clinical:read:organisation"], expires_in_minutes=30),
             Response(), admin, db,
         )
         key = db.get(AgentAccessKey, issued["id"])
         assert issued["api_key"].startswith("snt_mcp_")
         assert key.token_hash != issued["api_key"]
+        assert key.patient_ids == []
         assert valid_key(db, key).id == clinician.id
         revoke_key(key.id, admin, db)
         with pytest.raises(HTTPException, match="Invalid or expired"):
             valid_key(db, key)
 
-        outside_patient = db.scalar(select(Patient).where(Patient.organization_id != clinician.organization_id))
-        with pytest.raises(HTTPException, match="(?i)clinical access"):
+        with pytest.raises(HTTPException, match="(?i)scope"):
             approve_key(
                 KeyApproval(name="Invalid scope", purpose="Must not cross hospital boundary", user_id=clinician.id,
-                            scopes=["patient:read"], patient_ids=[outside_patient.id], expires_in_minutes=30),
+                            scopes=["clinical:read:system"], expires_in_minutes=30),
                 Response(), admin, db,
             )
+
+
+def test_mcp_governance_simulation_is_time_bounded_and_audited():
+    with SessionLocal() as db:
+        caio = db.scalar(select(User).where(User.email == "caio@sentinel.demo"))
+        result = start_mcp_demo_session(McpDemoSessionPayload(label="Synthetic external agent"), caio, db)
+        assert result["status"] == "simulated"
+        assert result["dashboard"]["live_evidence"]["mcp_activity"]["active_simulated_sessions"] >= 1
+        session = db.get(McpDemoSession, result["id"])
+        session.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+        assert build_governance_dashboard(db)["live_evidence"]["mcp_activity"]["active_simulated_sessions"] == 0
+        event = db.scalar(select(AuditEvent).where(AuditEvent.event_type == "mcp.demo_session_started"))
+        assert event is not None
+        assert event.detail == {"simulation": True, "expires_in_minutes": 5}
+
+
+def test_github_scheduler_requires_shared_secret(monkeypatch):
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "get_settings", lambda: SimpleNamespace(
+        schedule_enabled=True, scheduler_trigger_token="test-trigger", scheduler_mode="github_actions",
+    ))
+    with SessionLocal() as db:
+        with pytest.raises(HTTPException, match="Invalid scheduler trigger"):
+            scheduled_scan("Bearer wrong", db)
+        result = scheduled_scan("Bearer test-trigger", db)
+        assert result["status"] == "completed"
+        event = db.scalar(select(AuditEvent).where(AuditEvent.event_type == "scheduler.github_triggered").order_by(AuditEvent.created_at.desc()))
+        assert event is not None and event.detail["mode"] == "github_actions"

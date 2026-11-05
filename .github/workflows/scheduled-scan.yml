@@ -1,0 +1,29 @@
+name: Trigger hosted Sentinel scan
+
+on:
+  schedule:
+    # 02:00 Asia/Kuala_Lumpur (UTC+08:00).
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    # Set this repository variable to true only after the Free Render service
+    # and both secrets below have been configured.
+    if: vars.SENTINEL_SCHEDULER_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    env:
+      SENTINEL_API_URL: ${{ secrets.SENTINEL_API_URL }}
+      SENTINEL_SCHEDULER_TOKEN: ${{ secrets.SENTINEL_SCHEDULER_TOKEN }}
+    steps:
+      - name: Trigger authenticated synthetic scan
+        shell: bash
+        run: |
+          test -n "$SENTINEL_API_URL"
+          test -n "$SENTINEL_SCHEDULER_TOKEN"
+          curl --fail --silent --show-error --retry 1 --request POST \
+            --header "Authorization: Bearer $SENTINEL_SCHEDULER_TOKEN" \
+            "$SENTINEL_API_URL/api/internal/scheduled-scan"
