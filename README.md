@@ -18,6 +18,7 @@ The default no-credential local mode uses SQLite. Supabase Postgres is the cloud
 ## Evidence, Sentinel Agent, and MDT boundaries
 
 - The data seed contains exactly 100 fictional profiles: **45 Outpatient Clinic, 25 Medical Ward, 18 Surgical Ward, and 12 O&G Ward** across three fictional hospital/district pairs.
+- The cohort size is configurable for a fresh database with `SEED_PATIENT_COUNT` (12–10,000; default 100). The care-setting mix scales proportionally and the documented fixtures repeat every 100 profiles; tests use the default 100. To re-seed, delete `backend/sentinel.db` (or use a new `DATABASE_URL`). For about 5,000 profiles, set `LIVE_SIMULATION_TICK_SECONDS=10` because each simulated step re-scans every profile (about 3 seconds locally).
 - The deterministic, versioned CPG review tree performs data validity, applicability, evidence/confirmation, monitoring audit, and clinician-owned management/referral consideration. It is evidence support only—not diagnosis, treatment selection, urgency classification, or a referral order.
 - O&G records marked pregnancy-related are deliberately returned as **out of scope**, because this CPG does not cover diabetes in pregnancy.
 - **Sentinel Agent** is an authorised, persisted chat/orchestration layer. It can queue role-scoped evidence review, integrity verification, fixed aggregate-analysis handoff, or a public-source crawl restricted to HTTPS MOH/MEMS pages. It never passes patient data to the crawler.

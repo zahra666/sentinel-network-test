@@ -98,3 +98,13 @@ def test_reset_restores_source_integrity():
         assert verify_batch(batch, list(db.scalars(select(Observation)).all()))["local_match"] is True
         assert build_dashboard(db, admin)["series"] == []
         assert db.scalar(select(func.count()).select_from(Alert)) >= 0
+
+
+def test_seed_cohort_size_scales_care_mix():
+    from app.seed import BASE_CARE_MATRIX, care_matrix_for
+
+    assert care_matrix_for(100) == BASE_CARE_MATRIX
+    for total in (12, 500, 777, 5000):
+        matrix = care_matrix_for(total)
+        assert sum(count for *_, count in matrix) == total
+        assert [(org, setting) for org, setting, _ in matrix] == [(org, setting) for org, setting, _ in BASE_CARE_MATRIX]

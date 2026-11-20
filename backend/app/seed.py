@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 
 from .chain import build_source_batch
+from .config import get_settings
 from .db import SessionLocal, initialise_database
 from .models import AuditEvent, Condition, Observation, Organization, Patient, ResearchGrant, SourceBatch, User
 from .security import hash_password, verify_password
@@ -21,6 +22,22 @@ DEMO_EMAILS = (
     "researcher.denied@sentinel.demo",
 )
 ANCHOR = datetime(2026, 10, 31, 8, 0, tzinfo=timezone.utc)
+# Reference mix for the documented 100-profile cohort: (hospital index, care setting, profiles).
+BASE_CARE_MATRIX = [(0, "Outpatient Clinic", 15), (0, "Medical Ward", 8), (0, "Surgical Ward", 7), (0, "O&G Ward", 4), (1, "Outpatient Clinic", 15), (1, "Medical Ward", 9), (1, "Surgical Ward", 5), (1, "O&G Ward", 4), (2, "Outpatient Clinic", 15), (2, "Medical Ward", 8), (2, "Surgical Ward", 6), (2, "O&G Ward", 4)]
+
+
+def care_matrix_for(total: int) -> list[tuple[int, str, int]]:
+    """Scale the reference mix to `total` profiles (largest-remainder rounding).
+
+    With the default of 100 this returns BASE_CARE_MATRIX unchanged, so the
+    documented cohort and its fixtures stay identical.
+    """
+    base = sum(count for *_, count in BASE_CARE_MATRIX)
+    exact = [count * total / base for *_, count in BASE_CARE_MATRIX]
+    counts = [int(value) for value in exact]
+    for index in sorted(range(len(exact)), key=lambda i: exact[i] - counts[i], reverse=True)[: total - sum(counts)]:
+        counts[index] += 1
+    return [(org, setting, count) for (org, setting, _), count in zip(BASE_CARE_MATRIX, counts)]
 
 
 def seed() -> None:
@@ -76,13 +93,14 @@ def seed() -> None:
         db.flush()
         db.add(ResearchGrant(user_id=users[5].id, organization_id=None, purpose="Synthetic regional surveillance demonstration", scope="fixed-district-rate", expires_at=ANCHOR + timedelta(days=365)))
 
-        care_matrix = [(0, "Outpatient Clinic", 15), (0, "Medical Ward", 8), (0, "Surgical Ward", 7), (0, "O&G Ward", 4), (1, "Outpatient Clinic", 15), (1, "Medical Ward", 9), (1, "Surgical Ward", 5), (1, "O&G Ward", 4), (2, "Outpatient Clinic", 15), (2, "Medical Ward", 8), (2, "Surgical Ward", 6), (2, "O&G Ward", 4)]
+        total_profiles = get_settings().seed_patient_count
+        care_matrix = care_matrix_for(total_profiles)
         patients: list[Patient] = []
         ordinal = 0
         for org_index, setting, count in care_matrix:
             for local_index in range(count):
                 ordinal += 1
-                patient = Patient(reference=f"SYN-DM-{ordinal:03d}", organization_id=organisations[org_index].id, care_setting=setting, age_group=("18-44" if ordinal % 3 == 0 else "45-64" if ordinal % 3 == 1 else "65+"), symptomatic=ordinal % 17 == 0, pregnancy_related=setting == "O&G Ward" and local_index == 0, body_mass_index=33.0 if ordinal in {11, 22, 44} else 24.0 + (ordinal % 7), documented_complexity=ordinal % 11 == 0)
+                patient = Patient(reference=f"SYN-DM-{ordinal:03d}", organization_id=organisations[org_index].id, care_setting=setting, age_group=("18-44" if ordinal % 3 == 0 else "45-64" if ordinal % 3 == 1 else "65+"), symptomatic=ordinal % 17 == 0, pregnancy_related=setting == "O&G Ward" and local_index % 4 == 0, body_mass_index=33.0 if ordinal % 100 in {11, 22, 44} else 24.0 + (ordinal % 7), documented_complexity=ordinal % 11 == 0)
                 patients.append(patient)
                 db.add(patient)
         db.flush()
@@ -90,12 +108,12 @@ def seed() -> None:
         conditions: list[Condition] = []
         observations: list[Observation] = []
         for index, patient in enumerate(patients, start=1):
-            abnormal = index % 11 == 0 or index in {1, 17, 45}
+            abnormal = index % 11 == 0 or index % 100 in {1, 17, 45}
             hba1c_early, hba1c_late = (6.0, 7.1) if abnormal else (5.8, 6.0)
             fpg_early, fpg_late = (6.1, 7.6) if abnormal else (5.4, 5.8)
-            unit = "mg/dL" if index == 7 else "mmol/L"
+            unit = "mg/dL" if index % 100 == 7 else "mmol/L"
             values = [("hba1c", hba1c_early, "%", 50), ("fpg", fpg_early, unit, 48), ("hba1c", hba1c_late, "%", 12), ("fpg", fpg_late, unit, 10)]
-            if index != 9:
+            if index % 100 != 9:
                 values.append(("egfr", 72.0 - (index % 9), "mL/min/{1.73_m2}", 8))
             conditions.append(Condition(
                 patient_id=patient.id, source_id=f"COND-{index:03d}", version=1,
@@ -133,7 +151,7 @@ def seed() -> None:
                     observed_at=ANCHOR - timedelta(days=days_ago),
                     ingested_at=ANCHOR - timedelta(days=max(days_ago - 1, 0)),
                     source_id=f"SRC-{index:03d}-{sequence}", version=1,
-                    is_late_arrival=index == 13 and sequence == 1,
+                    is_late_arrival=index % 100 == 13 and sequence == 1,
                     ucum_unit=item_unit, result_status="final", method=("CKD-EPI creatinine-based formula / 1.73 sq M" if code == "egfr" else None),
                     egfr_equation=("CKD-EPI" if code == "egfr" else None),
                     provenance={"source": "deterministic synthetic seed", "synthetic_only": True, **mapping["conversion_provenance"]},
@@ -145,7 +163,7 @@ def seed() -> None:
         batch = build_source_batch(observations)
         db.add(batch)
         db.flush()
-        db.add(AuditEvent(actor_id=users[0].id, event_type="seed.completed", entity_type="source_batch", entity_id=batch.id, detail={"patients": len(patients), "observations": len(observations), "care_mix": {"outpatient": 45, "medical": 25, "surgical": 18, "og": 12}}))
+        db.add(AuditEvent(actor_id=users[0].id, event_type="seed.completed", entity_type="source_batch", entity_id=batch.id, detail={"patients": len(patients), "observations": len(observations), "care_mix": {setting: sum(c for _, name, c in care_matrix if name == setting) for setting in ("Outpatient Clinic", "Medical Ward", "Surgical Ward", "O&G Ward")}}))
         db.commit()
 
 
