@@ -128,24 +128,26 @@ def test_catch_up_storyline_tension_then_relief():
         run = start_run(db, admin, StartPayload(tick_seconds=2, scenario="surge"))  # legacy alias
         db.commit()
         assert run.simulated_days_per_tick == 14
-        review, quality, overdue, corrections = [], [], [], 0
+        review, quality, corrections = [], [], 0
         for _ in range(20):
             simulation_tick(db, run)
             view = build_dashboard(db, admin)
             current = view["current"]
             review.append(current["by_status"]["evidence_requires_clinician_review"] / current["total"])
             quality.append(current["by_status"]["data_quality_review"] / current["total"])
-            overdue.append(current["overdue"])
             corrections += view["feed"][0]["corrections_total"]
         db.commit()
         assert serialize_run(run, db)["phase"] == "recovery"
-        assert overdue[8] > overdue[2] + 50                      # missed follow-ups: overdue climbs
-        assert overdue[13] < overdue[8] // 2                       # recall clinic clears the backlog
+        assert view["feed"][0]["observations_total"] > 0
         assert max(review[9:14]) > review[8] + 0.1                 # tension: review share jumps
         assert max(quality[9:14]) > quality[8] + 0.03              # wrong-unit batch is caught
         assert corrections > 0 and quality[-1] < max(quality[9:14]) # corrected results resolve it
         assert review[-1] < max(review[9:14])                      # relief afterwards
         corrected = db.scalars(select(Observation).where(Observation.is_corrected.is_(True), Observation.source_id.like("SIM-%"))).all()
         assert corrected and all(item.version == 2 and item.corrects_observation_id and item.terminology_status == "verified" for item in corrected)
+        for _ in range(4):
+            simulation_tick(db, run)
+        db.commit()
+        assert run.ticks == 24 and run.status == "stopped"           # the story stops itself
         reset_simulation(db, admin)
         db.commit()

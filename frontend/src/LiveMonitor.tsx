@@ -15,7 +15,7 @@ const STATUS_COLORS: Record<string, string> = {
 async function call(path: string, token: string, method = "GET", body?: RecordValue) {
   const response = await fetch(`${API}${path}`, { method, body: body ? JSON.stringify(body) : undefined, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` } });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || "Request failed");
+  if (!response.ok) throw new Error(typeof payload.detail === "string" ? payload.detail : `Request failed (HTTP ${response.status}${response.status >= 500 ? " — the server is busy or restarting; try again" : ""})`);
   return payload;
 }
 
@@ -101,9 +101,7 @@ export default function LiveMonitor({ token, compact = false, tickSeconds, scena
     {alarm && <div className="live-alarm" role="status"><b>Review workload alert</b> {reviewPct}% of monitored profiles now need clinician review (run baseline {baselinePct}%). Review queue is filling faster than usual.</div>}
 
     <div className="live-kpis">
-      {compact && current.overdue !== null && current.overdue !== undefined
-        ? <Kpi label={`Overdue HbA1c (>${current.overdue_days} days)`} value={current.overdue} detail={`of ${current.total} monitored profiles`} delta={previous && previous.overdue !== null ? current.overdue - previous.overdue : null} tone={current.overdue > current.total * 0.2 ? "amber" : undefined} />
-        : <Kpi label="Monitored profiles" value={current.total} detail={current.overdue !== null && current.overdue !== undefined ? `${current.overdue} overdue for HbA1c (>${current.overdue_days} days)` : "Synthetic T2DM records in scope"} />}
+      <Kpi label="Monitored profiles" value={current.total} detail="Synthetic T2DM records in scope" />
       <Kpi label="Clinician review required" value={`${reviewPct}%`} detail={`${review} profiles`} delta={previous ? review - previous.by_status.evidence_requires_clinician_review : null} tone="coral" />
       <Kpi label="Confirmation gap" value={`${pct(gap, current.total)}%`} detail={`${gap} profiles`} delta={previous ? gap - previous.by_status.confirmation_gap : null} tone="amber" />
       {compact

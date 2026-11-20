@@ -26,7 +26,7 @@ const SCENARIO = "catch_up";
 async function call(path: string, token: string, method = "GET", body?: RecordValue) {
   const response = await fetch(`${API}${path}`, { method, body: body ? JSON.stringify(body) : undefined, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` } });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || "Request failed");
+  if (!response.ok) throw new Error(typeof payload.detail === "string" ? payload.detail : `Request failed (HTTP ${response.status}${response.status >= 500 ? " — the server is busy or restarting; try again" : ""})`);
   return payload;
 }
 
@@ -176,7 +176,6 @@ function stepLines(step: RecordValue, statuses: RecordValue[]): Line[] {
     line(`a${i}v`, ["   ", ""], ...check("hba1c", row.hba1c, THRESHOLDS.hba1c), ["  "], ...check("fpg", row.fpg, THRESHOLDS.fpg));
     line(`a${i}t`, ["    "], [label(row.from), `st ${row.from}`], [" → "], [label(row.to), `st ${row.to}`]);
   });
-  if (step.overdue !== null && step.overdue !== undefined) line("od", [">>> ", "p"], ["overdue_hba1c", "f"], ["(days="], ["90", "n"], [") → "], [String(step.overdue), step.overdue > 50 ? "n hi" : "n"], [" profiles with no HbA1c in the last 90 days", "c"]);
   const others = (step.transitions_total || 0) - Math.min(SAMPLE_ASSESSMENTS, (step.transitions || []).length);
   line("t", [step.transitions_total ? `-- ${step.transitions_total} profiles changed review state${others > 0 ? ` (${others} not shown)` : ""}` : "-- no review-state changes this step", "c"]);
   line("z", [" "]);

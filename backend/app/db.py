@@ -18,7 +18,8 @@ def database_url() -> str:
 
 def build_engine():
     url = database_url()
-    return create_engine(url, connect_args={"check_same_thread": False} if url.startswith("sqlite") else {}, pool_pre_ping=True)
+    # timeout: wait up to 30 s for a write lock (the Live Monitor simulator writes in the background).
+    return create_engine(url, connect_args={"check_same_thread": False, "timeout": 30} if url.startswith("sqlite") else {}, pool_pre_ping=True)
 
 
 engine = build_engine()

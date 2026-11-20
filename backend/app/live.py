@@ -63,7 +63,7 @@ class StartPayload(BaseModel):
 # "catch_up" is a scripted demo storyline over simulated time, loosely grounded in Malaysian
 # follow-up patterns (routine 3-6-monthly HbA1c; missed follow-ups followed by recall):
 #   routine  -> results arrive as booked
-#   missed   -> follow-ups lapse, few results arrive, "overdue for HbA1c" climbs (tension builds)
+#   missed   -> follow-ups lapse, few results arrive (tension builds)
 #   catch_up -> recall clinic: a backlog of results lands at once; a subset whose control
 #               slipped while unmonitored returns higher values; one lab batch carries the
 #               wrong glucose unit, which the terminology gate rejects (data-quality review)
@@ -79,7 +79,7 @@ SCENARIO_PHASES = [
     {"key": "stable", "label": "Routine follow-up · back to normal", "until": None, "probability": 0.30, "offset": (-0.1, -0.2), "share": 1.0, "ramp": 1},
 ]
 SCENARIO_DAYS_PER_TICK = 14
-OVERDUE_DAYS = 90  # illustrative "HbA1c every 3-6 months" monitoring window
+STORY_LAST_TICK = 24  # the catch_up storyline stops itself after its stable tail
 MG_DL_PER_MMOL_L = 18.0156
 SURGE_PHASES = SCENARIO_PHASES  # backwards-compatible name
 _scenario_cache: dict[str, str] = {}
@@ -284,9 +284,11 @@ def simulation_tick(db: Session, run: SimulationRun) -> dict:
     snapshot.events = {
         "step": run.ticks, "phase": phase["key"] if phase else None, "phase_label": phase["label"] if phase else None,
         "simulated_from": previous.isoformat(), "simulated_to": as_utc(run.simulated_now).isoformat(),
-        **(snapshot.events or {}), "observations": records, "corrections": corrections, "transitions": transitions,
+        "observations": records, "corrections": corrections, "transitions": transitions,
         "scan": {"id": scan.id, "stages": scan.events, "new_alerts": scan.finding_count},
     }
+    if phase and run.ticks >= STORY_LAST_TICK:
+        stop_run(db, run, "story_complete")
     return {"tick": run.ticks, "phase": phase["key"] if phase else None, "observations_written": written, "new_alerts": scan.finding_count, "snapshot_id": snapshot.id, "simulated_now": as_utc(run.simulated_now).isoformat()}
 
 
@@ -302,16 +304,8 @@ def capture_snapshot(db: Session, run: SimulationRun | None, scan: Scan | None) 
         select(Patient.organization_id, func.count(Alert.id)).join(Patient, Patient.id == Alert.patient_id)
         .where(Alert.status == "new").group_by(Patient.organization_id)
     ).all())
-    overdue: dict[str, int] = {}
-    if run is not None:
-        cutoff = as_utc(run.simulated_now) - timedelta(days=OVERDUE_DAYS)
-        last_hba1c = dict(db.execute(select(Observation.patient_id, func.max(Observation.observed_at)).where(Observation.code == "hba1c").group_by(Observation.patient_id)).all())
-        for patient, _ in analyses:
-            seen = as_utc(last_hba1c.get(patient.id))
-            if seen is None or seen < cutoff:
-                overdue[patient.organization_id] = overdue.get(patient.organization_id, 0) + 1
     snapshot = LiveStatusSnapshot(
-        run_id=run.id if run else None, scan_id=scan.id if scan else None, events={"overdue": overdue} if run is not None else {},
+        run_id=run.id if run else None, scan_id=scan.id if scan else None,
         simulated_at=as_utc(run.simulated_now) if run else None,
         counts=[{"organization_id": org, "care_setting": setting, "status": status, "patients": n} for (org, setting, status), n in sorted(counter.items())],
         open_alerts=open_alerts,
@@ -412,12 +406,6 @@ def start_background_runner() -> None:
 # --------------------------------------------------------------------------- read model
 
 
-def _scoped_sum(per_org: dict | None, organization_id: str | None) -> int | None:
-    if per_org is None:
-        return None
-    return per_org.get(organization_id, 0) if organization_id else sum(per_org.values())
-
-
 def _blank() -> dict[str, int]:
     return {key: 0 for key in STATUS_KEYS}
 
@@ -494,7 +482,6 @@ def build_dashboard(db: Session, user: User, points: int = 72) -> dict:
             "simulated_at": as_utc(snap.simulated_at).isoformat() if snap.simulated_at else None,
             "by_status": _by_status(_scoped(snap.counts, org_id)),
             "open_alerts": alerts.get(org_id, 0) if org_id else sum(alerts.values()),
-            "overdue": _scoped_sum((snap.events or {}).get("overdue"), org_id),
         })
 
     feed = []
@@ -514,7 +501,6 @@ def build_dashboard(db: Session, user: User, points: int = 72) -> dict:
             "observations_total": len(observations), "observations": strip(sample), "rejected_total": len(rejected),
             "corrections_total": len(corrections), "corrections": strip(corrections[:4]),
             "transitions_total": len(transitions), "transitions": strip(transitions[:5]),
-            "overdue": _scoped_sum(events.get("overdue"), org_id),
             "scan": events.get("scan", {}),
         })
 
@@ -525,8 +511,7 @@ def build_dashboard(db: Session, user: User, points: int = 72) -> dict:
         "scope": {"organization": organization.name if organization else "All hospitals", "role": user.role},
         "statuses": STATUSES,
         "simulation": {**(serialize_run(run, db) or {}), "available": get_settings().live_simulation_enabled, "can_control": user.role == "administrator"},
-        "current": {"total": sum(current.values()), "by_status": current, "open_alerts": db.scalar(open_query) or 0,
-                    "overdue": series[-1]["overdue"] if series else None, "overdue_days": OVERDUE_DAYS},
+        "current": {"total": sum(current.values()), "by_status": current, "open_alerts": db.scalar(open_query) or 0},
         "series": series,
         "by_setting": [{"care_setting": name, "total": sum(values.values()), "by_status": values} for name, values in sorted(by_setting.items())],
         "recent_alerts": [serialize_alert(alert, db) for alert in recent],
