@@ -46,3 +46,11 @@
 .live-dot{width:8px;height:8px;border-radius:50%;flex:none}
 .live-footnote{font-size:11px;color:#7b9094;line-height:1.5;margin:6px 0 0}
 @media(max-width:1050px){.live-kpis{grid-template-columns:repeat(2,1fr)}.live-grid{grid-template-columns:1fr}}
+.live-kpi strong{animation:kpi-pop .5s ease-out}
+@keyframes kpi-pop{0%{transform:translateY(-3px);opacity:.35}100%{transform:none;opacity:1}}
+.live-alarm{background:#fdebe5;border:1px solid #f0b8a5;color:#8f3418;border-radius:10px;padding:10px 14px;font-size:13px;animation:alarm-glow 1.6s ease-in-out infinite}
+.live-alarm b{text-transform:uppercase;letter-spacing:.04em;font-size:11px;margin-right:6px}
+.live.alarm .live-kpi.coral{background:#fff3ef;border-color:#eea58c;box-shadow:0 0 0 3px rgba(212,96,59,.14)}
+.live.alarm .live-kpi.coral strong{color:#c23a12}
+@keyframes alarm-glow{50%{box-shadow:0 0 0 4px rgba(212,96,59,.18)}}
+@media (prefers-reduced-motion:reduce){.live-kpi strong,.live-alarm{animation:none}}

@@ -2,6 +2,7 @@ import React, { FormEvent, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import aurora from "./assets/sentinel-aurora-v2.png";
 import LiveMonitor from "./LiveMonitor";
+import DemoStage from "./DemoStage";
 import "./styles.css";
 import "./fhir.css";
 import "./governance.css";
@@ -32,6 +33,7 @@ function App() {
   const [alerts, setAlerts] = useState<RecordValue[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [demo, setDemo] = useState(() => new URLSearchParams(window.location.search).has("demo"));
 
   const refresh = async () => {
     if (!token) return;
@@ -68,7 +70,7 @@ function App() {
   });
   const content = {
     overview: <Overview data={overview} onRun={async () => { await api("/scans/run", token, { method: "POST" }); await refresh(); }} />,
-    live: <LiveMonitor token={token} />,
+    live: <LiveMonitor token={token} onDemo={() => setDemo(true)} />,
     patients: <Patients patients={patients} token={token} />,
     alerts: <Alerts alerts={alerts} token={token} refresh={refresh} />,
     guideline: <GuidelineReview patients={patients} token={token} />,
@@ -78,6 +80,8 @@ function App() {
     governance: governanceRole ? <Governance token={token} /> : <Empty label="AI Governance is available only to administrators and CAIO reviewers." />,
     status: <Status token={token} />,
   }[page];
+  const canDemo = user?.role === "administrator" || user?.role === "clinician";
+  if (demo && canDemo) return <DemoStage token={token} onExit={() => { setDemo(false); setPage("live"); if (window.location.search) window.history.replaceState(null, "", window.location.pathname); }} />;
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><span className="brand-mark">⌁</span><span>Sentinel<br/><b>Network</b></span></div><div className="environment">SYNTHETIC DEMO</div><nav>{visibleNav.map(([id, label, icon]) => <button key={id} className={page === id ? "nav active" : "nav"} onClick={() => setPage(id)}><span>{icon}</span>{label}</button>)}</nav><div className="sidebar-foot"><span className="dot"/> Local-first integrity<br/>Clinician review required</div></aside>
     <main className="main"><header className="topbar"><div><p className="eyebrow">SENTINEL NETWORK / CLINICAL REVIEW</p><h1>{nav.find((item) => item[0] === page)?.[1]}</h1></div><div className="user-menu"><span className="role-pill">{user?.role || "authorised user"}</span><div className="avatar">{(user?.email || "U")[0].toUpperCase()}</div><button className="link-button" onClick={() => setToken("")}>Sign out</button></div></header>

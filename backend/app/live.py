@@ -15,6 +15,7 @@ import threading
 import time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -54,6 +55,41 @@ _runner_started = False
 class StartPayload(BaseModel):
     tick_seconds: int | None = Field(default=None, ge=2, le=60)
     simulated_days_per_tick: int | None = Field(default=None, ge=1, le=30)
+    scenario: Literal["steady", "surge"] = "steady"
+
+
+# --------------------------------------------------------------------------- pitch storyline
+# "surge" is a scripted demo storyline over simulated time: a calm baseline, a burst of
+# synthetic test results with higher values in a susceptible subset, then recovery.
+# Values still pass through the unchanged deterministic review tree; only the synthetic
+# input stream is shaped. Phase boundaries are inclusive tick numbers.
+SURGE_PHASES = [
+    {"key": "baseline", "label": "Baseline · steady state", "until": 4, "probability": 0.35, "offset": (-0.2, -0.4), "share": 1.0, "ramp": 1},
+    {"key": "surge", "label": "Surge · result influx", "until": 11, "probability": 1.0, "offset": (1.6, 3.2), "share": 0.6, "ramp": 4},
+    {"key": "recovery", "label": "Recovery · values easing", "until": 18, "probability": 0.8, "offset": (-0.4, -0.8), "share": 1.0, "ramp": 1},
+    {"key": "stable", "label": "Stable · back to baseline", "until": None, "probability": 0.35, "offset": (-0.2, -0.4), "share": 1.0, "ramp": 1},
+]
+_scenario_cache: dict[str, str] = {}
+
+
+def run_scenario(db: Session, run: SimulationRun) -> str:
+    """The scenario is recorded in the run's start audit event, so it survives an API restart."""
+    if run.id not in _scenario_cache:
+        event = db.scalar(select(AuditEvent).where(AuditEvent.event_type == "live.simulation_started", AuditEvent.entity_id == run.id))
+        _scenario_cache[run.id] = ((event.detail or {}).get("scenario") if event else None) or "steady"
+    return _scenario_cache[run.id]
+
+
+def surge_phase(tick: int) -> dict:
+    return next(phase for phase in SURGE_PHASES if phase["until"] is None or tick <= phase["until"])
+
+
+def surge_shift(tick: int) -> tuple[float, float]:
+    """Phase offset, ramped in over the first ticks of a phase so the curve builds rather than jumps."""
+    index = SURGE_PHASES.index(phase := surge_phase(tick))
+    start = SURGE_PHASES[index - 1]["until"] + 1 if index else 1
+    scale = min(1.0, (tick - start + 1) / phase["ramp"])
+    return phase["offset"][0] * scale, phase["offset"][1] * scale
 
 
 def as_utc(value: datetime | None) -> datetime | None:
@@ -92,6 +128,7 @@ def _profile(reference: str) -> dict:
         "hba1c_base": 5.4 + 1.5 * ((digest % 1000) / 1000),       # 5.4-6.9 %
         "fpg_base": 4.8 + 2.8 * (((digest // 1000) % 1000) / 1000),  # 4.8-7.6 mmol/L
         "phase": ((digest // 10**8) % 360) * math.pi / 180,
+        "susceptibility": ((digest // 10**12) % 1000) / 1000,  # who is affected by a storyline surge
     }
 
 
@@ -153,6 +190,9 @@ def simulation_tick(db: Session, run: SimulationRun) -> dict:
     elapsed_days = (as_utc(run.simulated_now) - as_utc(run.simulated_start)).days
     cohort_wave = 0.25 * math.sin(2 * math.pi * elapsed_days / 150)  # shared seasonal swing
     probability = min(1.0, days / max(1, settings.live_simulation_mean_test_interval_days))
+    phase = surge_phase(run.ticks) if run_scenario(db, run) == "surge" else None
+    if phase:
+        probability = phase["probability"]
 
     latest = _latest_values(db)
     written = 0
@@ -163,8 +203,13 @@ def simulation_tick(db: Session, run: SimulationRun) -> dict:
         values = latest.get(patient.id, {})
         observed_at = previous + timedelta(days=rng.randint(1, days), hours=rng.randint(7, 16))
         wave = cohort_wave + 0.15 * math.sin(2 * math.pi * elapsed_days / 90 + profile["phase"])
-        hba1c = _next_value(values.get("hba1c_ngsp", profile["hba1c_base"]), _target(profile, "hba1c", elapsed_days), "hba1c", wave, rng)
-        fpg = _next_value(values.get("fpg", profile["fpg_base"]), _target(profile, "fpg", elapsed_days), "fpg", wave * 1.6, rng)
+        shift = (0.0, 0.0)
+        if phase:
+            wave = 0.0  # the storyline, not the seasonal swing, drives the cohort
+            if profile["susceptibility"] < phase["share"]:
+                shift = surge_shift(run.ticks)
+        hba1c = _next_value(values.get("hba1c_ngsp", profile["hba1c_base"]), _target(profile, "hba1c", elapsed_days) + shift[0], "hba1c", wave, rng)
+        fpg = _next_value(values.get("fpg", profile["fpg_base"]), _target(profile, "fpg", elapsed_days) + shift[1], "fpg", wave * 1.6, rng)
         db.add(_observation(patient, run, "hba1c", hba1c, "%", observed_at))
         db.add(_observation(patient, run, "fpg", fpg, "mmol/L", observed_at))
         written += 2
@@ -173,7 +218,7 @@ def simulation_tick(db: Session, run: SimulationRun) -> dict:
     run.last_tick_at = now_utc()
     scan = execute_scan(db, trigger=SIM_TRIGGER)
     snapshot = capture_snapshot(db, run=run, scan=scan)
-    return {"tick": run.ticks, "observations_written": written, "new_alerts": scan.finding_count, "snapshot_id": snapshot.id, "simulated_now": as_utc(run.simulated_now).isoformat()}
+    return {"tick": run.ticks, "phase": phase["key"] if phase else None, "observations_written": written, "new_alerts": scan.finding_count, "snapshot_id": snapshot.id, "simulated_now": as_utc(run.simulated_now).isoformat()}
 
 
 def capture_snapshot(db: Session, run: SimulationRun | None, scan: Scan | None) -> LiveStatusSnapshot:
@@ -211,9 +256,10 @@ def start_run(db: Session, user: User, payload: StartPayload) -> SimulationRun:
     )
     db.add(run)
     db.flush()
+    _scenario_cache[run.id] = payload.scenario
     capture_snapshot(db, run=run, scan=None)
     db.add(AuditEvent(actor_id=user.id, event_type="live.simulation_started", entity_type="simulation_run", entity_id=run.id,
-                      detail={"synthetic_only": True, "tick_seconds": run.tick_seconds, "simulated_days_per_tick": run.simulated_days_per_tick}))
+                      detail={"synthetic_only": True, "tick_seconds": run.tick_seconds, "simulated_days_per_tick": run.simulated_days_per_tick, "scenario": payload.scenario}))
     return run
 
 
@@ -306,10 +352,13 @@ def _live_counts(db: Session) -> list[dict]:
     return [{"organization_id": org, "care_setting": setting, "status": status, "patients": n} for (org, setting, status), n in counter.items()]
 
 
-def serialize_run(run: SimulationRun | None) -> dict | None:
+def serialize_run(run: SimulationRun | None, db: Session | None = None) -> dict | None:
     if not run:
         return None
+    scenario = run_scenario(db, run) if db is not None else _scenario_cache.get(run.id, "steady")
+    phase = surge_phase(run.ticks) if scenario == "surge" and run.ticks else None
     return {
+        "scenario": scenario, "phase": phase["key"] if phase else None, "phase_label": phase["label"] if phase else None,
         "id": run.id, "status": run.status, "ticks": run.ticks, "tick_seconds": run.tick_seconds,
         "simulated_days_per_tick": run.simulated_days_per_tick, "observations_written": run.observations_written,
         "simulated_start": as_utc(run.simulated_start).isoformat(), "simulated_now": as_utc(run.simulated_now).isoformat(),
@@ -366,7 +415,7 @@ def build_dashboard(db: Session, user: User, points: int = 72) -> dict:
         "time_label": "Simulated time (accelerated)" if run else "No simulation run",
         "scope": {"organization": organization.name if organization else "All hospitals", "role": user.role},
         "statuses": STATUSES,
-        "simulation": {**(serialize_run(run) or {}), "available": get_settings().live_simulation_enabled, "can_control": user.role == "administrator"},
+        "simulation": {**(serialize_run(run, db) or {}), "available": get_settings().live_simulation_enabled, "can_control": user.role == "administrator"},
         "current": {"total": sum(current.values()), "by_status": current, "open_alerts": db.scalar(open_query) or 0},
         "series": series,
         "by_setting": [{"care_setting": name, "total": sum(values.values()), "by_status": values} for name, values in sorted(by_setting.items())],
@@ -421,3 +470,27 @@ def reset(user: User = Depends(require_roles("administrator")), db: Session = De
         removed = reset_simulation(db, user)
         db.commit()
     return {"removed": removed, "dashboard": build_dashboard(db, user)}
+
+@router.get("/feed")
+def live_feed(limit: int = Query(default=40, ge=1, le=200), user: User = Depends(require_roles("administrator", "clinician")), db: Session = Depends(get_db)) -> dict:
+    """Newest simulated observation writes plus the latest scan, for the demo-stage ingestion log."""
+    org_id = user.organization_id if user.role == "clinician" else None
+    query = (select(Observation, Patient).join(Patient, Patient.id == Observation.patient_id)
+             .where(Observation.source_id.like(f"{SIM_SOURCE_PREFIX}%")))
+    if org_id:
+        query = query.where(Patient.organization_id == org_id)
+    rows = db.execute(query.order_by(Observation.ingested_at.desc(), Observation.source_id.desc()).limit(limit)).all()
+    scan = db.scalars(select(Scan).order_by(Scan.started_at.desc()).limit(1)).first()
+    return {
+        "simulation": serialize_run(latest_run(db), db),
+        "observations": [{
+            "id": obs.id, "source_id": obs.source_id, "patient_reference": patient.reference, "care_setting": patient.care_setting,
+            "code": obs.code, "value": obs.value, "unit": obs.unit, "standard_code": obs.standard_code,
+            "terminology_status": obs.terminology_status, "normalised_value": obs.normalised_value,
+            "observed_at": as_utc(obs.observed_at).isoformat(), "ingested_at": as_utc(obs.ingested_at).isoformat(),
+        } for obs, patient in rows],
+        "latest_scan": {
+            "id": scan.id, "trigger": scan.trigger, "status": scan.status, "scanned_count": scan.scanned_count,
+            "finding_count": scan.finding_count, "started_at": as_utc(scan.started_at).isoformat(),
+        } if scan else None,
+    }

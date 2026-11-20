@@ -12,18 +12,20 @@ const STATUS_COLORS: Record<string, string> = {
   out_of_scope: "#c7d3d4",
 };
 
-async function call(path: string, token: string, method = "GET") {
-  const response = await fetch(`${API}${path}`, { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` } });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.detail || "Request failed");
-  return body;
+async function call(path: string, token: string, method = "GET", body?: RecordValue) {
+  const response = await fetch(`${API}${path}`, { method, body: body ? JSON.stringify(body) : undefined, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` } });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.detail || "Request failed");
+  return payload;
 }
 
 const pct = (part: number, total: number) => (total ? Math.round((part / total) * 100) : 0);
 const simDate = (iso?: string | null) => iso ? new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
 const klTime = (date: Date) => `${date.toLocaleTimeString("en-GB", { timeZone: "Asia/Kuala_Lumpur" })} MYT`;
 
-export default function LiveMonitor({ token }: { token: string }) {
+type LiveMonitorProps = { token: string, compact?: boolean, tickSeconds?: number, scenario?: "steady" | "surge", hideControls?: boolean, onDemo?: () => void };
+
+export default function LiveMonitor({ token, compact = false, tickSeconds, scenario, hideControls = false, onDemo }: LiveMonitorProps) {
   const [data, setData] = useState<RecordValue | null>(null);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -41,24 +43,24 @@ export default function LiveMonitor({ token }: { token: string }) {
     try {
       const [dashboard, detail] = await Promise.all([
         call("/live/dashboard", token),
-        patientId ? call(`/patients/${patientId}`, token) : Promise.resolve(null),
+        patientId && !compact ? call(`/patients/${patientId}`, token) : Promise.resolve(null),
       ]);
       setData(dashboard); setPatient(detail); setUpdatedAt(new Date()); setError("");
     } catch (err: any) { setError(err.message); }
     finally { inFlight.current = false; }
-  }, [token, patientId]);
+  }, [token, patientId, compact]);
 
   useEffect(() => { call("/patients", token).then((items) => { setPatients(items); if (items.length && !patientId) setPatientId(items[0].id); }).catch((err) => setError(err.message)); }, [token]);
 
   useEffect(() => {
     load();
-    const every = running ? 3000 : 15000;
+    const every = running ? (compact ? 1500 : 3000) : (compact ? 5000 : 15000);
     const timer = window.setInterval(() => { if (!document.hidden) load(); }, every);
     return () => window.clearInterval(timer);
-  }, [load, running]);
+  }, [load, running, compact]);
 
   const control = async (action: "start" | "stop" | "step" | "reset") => {
-    try { setBusy(true); setError(""); await call(`/live/simulation/${action}`, token, "POST"); await load(); }
+    try { setBusy(true); setError(""); await call(`/live/simulation/${action}`, token, "POST", action === "start" && (tickSeconds || scenario) ? { tick_seconds: tickSeconds, scenario } : undefined); await load(); }
     catch (err: any) { setError(err.message); }
     finally { setBusy(false); }
   };
@@ -71,8 +73,14 @@ export default function LiveMonitor({ token }: { token: string }) {
   const review = current.by_status.evidence_requires_clinician_review;
   const gap = current.by_status.confirmation_gap;
   const sim = data.simulation;
+  const reviewPct = pct(review, current.total);
+  const first = series.length ? series[0] : null;
+  const baselinePct = first ? pct(first.by_status.evidence_requires_clinician_review, Object.values(first.by_status as Record<string, number>).reduce((a, b) => a + b, 0)) : reviewPct;
+  const alarmAt = Math.max(20, baselinePct + 12);
+  const alarm = running || sim.status === "stopped" ? reviewPct >= alarmAt : false;
+  const newAlerts = previous ? current.open_alerts - previous.open_alerts : null;
 
-  return <section className="live">
+  return <section className={`live${compact ? " compact" : ""}${alarm ? " alarm" : ""}`}>
     <div className="live-bar">
       <div className="live-bar-meta">
         <span className={`live-pill ${running ? "on" : ""}`}><i />{running ? "Simulation running" : sim.status === "stopped" ? "Simulation stopped" : sim.status === "error" ? "Simulation error" : "Idle"}</span>
@@ -80,7 +88,8 @@ export default function LiveMonitor({ token }: { token: string }) {
         <span>Simulated date <b>{simDate(sim.simulated_now)}</b> <small>{data.time_label}</small></span>
         <span>Updated {updatedAt ? klTime(updatedAt) : "—"}</span>
       </div>
-      {sim.can_control && <div className="live-controls">
+      {onDemo && <button className="secondary" onClick={onDemo}>Demo mode ⧉</button>}
+      {sim.can_control && !hideControls && <div className="live-controls">
         {!running && <button className="primary" disabled={busy || !sim.available} onClick={() => control("start")}>Start simulation</button>}
         {running && <button className="secondary" disabled={busy} onClick={() => control("stop")}>Stop</button>}
         {running && <button className="secondary" disabled={busy} onClick={() => control("step")}>Advance one step</button>}
@@ -89,12 +98,15 @@ export default function LiveMonitor({ token }: { token: string }) {
     </div>
     {error && <div className="error">{error}</div>}
     {sim.error_summary && <div className="error">Last simulation stopped with an error: {sim.error_summary}</div>}
+    {alarm && <div className="live-alarm" role="status"><b>Review workload alert</b> {reviewPct}% of monitored profiles now need clinician review (run baseline {baselinePct}%). Review queue is filling faster than usual.</div>}
 
     <div className="live-kpis">
       <Kpi label="Monitored profiles" value={current.total} detail="Synthetic T2DM records in scope" />
-      <Kpi label="Clinician review required" value={`${pct(review, current.total)}%`} detail={`${review} profiles`} delta={previous ? review - previous.by_status.evidence_requires_clinician_review : null} tone="coral" />
+      <Kpi label="Clinician review required" value={`${reviewPct}%`} detail={`${review} profiles`} delta={previous ? review - previous.by_status.evidence_requires_clinician_review : null} tone="coral" />
       <Kpi label="Confirmation gap" value={`${pct(gap, current.total)}%`} detail={`${gap} profiles`} delta={previous ? gap - previous.by_status.confirmation_gap : null} tone="amber" />
-      <Kpi label="Open review alerts" value={current.open_alerts} detail="Awaiting acknowledgement" delta={previous ? current.open_alerts - previous.open_alerts : null} />
+      {compact
+        ? <Kpi label="New review alerts" value={newAlerts ?? 0} detail={`${current.open_alerts} open in total`} tone={alarm ? "coral" : undefined} />
+        : <Kpi label="Open review alerts" value={current.open_alerts} detail="Awaiting acknowledgement" delta={previous ? current.open_alerts - previous.open_alerts : null} />}
     </div>
 
     <div className="live-grid">
@@ -114,7 +126,7 @@ export default function LiveMonitor({ token }: { token: string }) {
     </div>
 
     <div className="live-grid">
-      <article className="live-card">
+      {!compact && <article className="live-card">
         <header className="live-card-split"><div><h3>Patient trend</h3><p>Verified HbA1c and FPG results (normalised units)</p></div>
           <select aria-label="Synthetic patient" value={patientId} onChange={(event) => setPatientId(event.target.value)}>{patients.map((item) => <option key={item.id} value={item.id}>{item.reference} · {item.care_setting}</option>)}</select>
         </header>
@@ -124,7 +136,7 @@ export default function LiveMonitor({ token }: { token: string }) {
           <TrendChart observations={patient.observations} code="fpg" label="Fasting plasma glucose (mmol/L)" threshold={7.0} />
           <p className="live-footnote">Dashed line: illustrative demo rule threshold, not clinical guidance.</p>
         </> : <div className="empty">Select a synthetic profile.</div>}
-      </article>
+      </article>}
       <article className="live-card">
         <header><h3>Newest review alerts</h3><p>Created by the normal Sync → Analyse → Route scan</p></header>
         <div className="live-alerts">{data.recent_alerts.length ? data.recent_alerts.map((alert: RecordValue) => <button key={alert.id} className="live-alert" onClick={() => alert.patient && setPatientId(alert.patient.id)}>
@@ -134,12 +146,12 @@ export default function LiveMonitor({ token }: { token: string }) {
         </button>) : <div className="empty">No review alerts yet.</div>}</div>
       </article>
     </div>
-    <p className="live-footnote">Synthetic data — demonstration only. Simulated results use accelerated time and pass through the existing deterministic review tree; the monitor never diagnoses, prescribes, triages or contacts patients. {data.integrity_note}</p>
+    {compact ? <p className="live-footnote">Synthetic data — demonstration only. Accelerated simulated time; the monitor never diagnoses, prescribes, triages or contacts patients.</p> : <p className="live-footnote">Synthetic data — demonstration only. Simulated results use accelerated time and pass through the existing deterministic review tree; the monitor never diagnoses, prescribes, triages or contacts patients. {data.integrity_note}</p>}
   </section>;
 }
 
 function Kpi({ label, value, detail, delta, tone }: { label: string, value: React.ReactNode, detail: string, delta?: number | null, tone?: string }) {
-  return <article className={`live-kpi ${tone || ""}`}><p>{label}</p><strong>{value}</strong><small>{detail}{delta ? <em className={delta > 0 ? "up" : "down"}>{delta > 0 ? `▲ ${delta}` : `▼ ${Math.abs(delta)}`} since last step</em> : null}</small></article>;
+  return <article className={`live-kpi ${tone || ""}`}><p>{label}</p><strong key={String(value)}>{value}</strong><small>{detail}{delta ? <em className={delta > 0 ? "up" : "down"}>{delta > 0 ? `▲ ${delta}` : `▼ ${Math.abs(delta)}`} since last step</em> : null}</small></article>;
 }
 
 function Legend({ statuses }: { statuses: RecordValue[] }) {

@@ -109,3 +109,26 @@ def test_seed_cohort_size_scales_care_mix():
         matrix = care_matrix_for(total)
         assert sum(count for *_, count in matrix) == total
         assert [(org, setting) for org, setting, _ in matrix] == [(org, setting) for org, setting, _ in BASE_CARE_MATRIX]
+
+
+def test_surge_scenario_rises_then_recovers():
+    from app.live import serialize_run, surge_phase
+
+    assert [surge_phase(t)["key"] for t in (1, 4, 5, 11, 12, 18, 19, 40)] == ["baseline", "baseline", "surge", "surge", "recovery", "recovery", "stable", "stable"]
+    with SessionLocal() as db:
+        admin = _user(db, "admin@sentinel.demo")
+        reset_simulation(db, admin)
+        run = start_run(db, admin, StartPayload(tick_seconds=2, scenario="surge"))
+        db.commit()
+        review = []
+        for _ in range(18):
+            simulation_tick(db, run)
+            current = build_dashboard(db, admin)["current"]
+            review.append(current["by_status"]["evidence_requires_clinician_review"] / current["total"])
+        db.commit()
+        assert serialize_run(run, db)["phase"] == "recovery"
+        peak = max(review[4:11])
+        assert peak > review[3] + 0.2      # surge clearly above baseline
+        assert review[-1] < peak - 0.2     # recovery clearly below the peak
+        reset_simulation(db, admin)
+        db.commit()
