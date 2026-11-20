@@ -110,14 +110,18 @@ export default function LiveMonitor({ token, compact = false, tickSeconds, scena
     </div>
 
     <div className="live-grid">
-      {!compact && <article className="live-card live-feed">
-        <header><h3>Live data pipeline</h3><p>What each simulated step actually wrote to the database and evaluated — newest first</p></header>
-        <PipelineFeed feed={data.feed || []} statuses={statuses} running={running} />
-      </article>}
       <article className="live-card">
         <header><h3>Review-state trend</h3><p>Share of monitored profiles in each deterministic CPG review state, per simulated step</p></header>
         <Legend statuses={statuses} />
         <TrendLines series={series} statuses={statuses} />
+      </article>
+      <article className="live-card">
+        <header><h3>By care setting</h3><p>Current review-state mix</p></header>
+        <div className="live-settings">{data.by_setting.map((row: RecordValue) => <div key={row.care_setting} className="live-setting">
+          <div className="live-setting-head"><span>{row.care_setting}</span><b>{pct(row.by_status.evidence_requires_clinician_review, row.total)}% review</b></div>
+          <div className="live-stackbar">{statuses.map((s) => row.by_status[s.key] ? <i key={s.key} title={`${s.label}: ${row.by_status[s.key]}`} style={{ width: `${(row.by_status[s.key] / row.total) * 100}%`, background: STATUS_COLORS[s.key] }} /> : null)}</div>
+          <small>{row.total} profiles</small>
+        </div>)}</div>
       </article>
     </div>
 
@@ -133,24 +137,14 @@ export default function LiveMonitor({ token, compact = false, tickSeconds, scena
           <p className="live-footnote">Dashed line: illustrative demo rule threshold, not clinical guidance.</p>
         </> : <div className="empty">Select a synthetic profile.</div>}
       </article>}
-      <div className="live-stack">
-        <article className="live-card">
-          <header><h3>By care setting</h3><p>Current review-state mix</p></header>
-          <div className="live-settings">{data.by_setting.map((row: RecordValue) => <div key={row.care_setting} className="live-setting">
-            <div className="live-setting-head"><span>{row.care_setting}</span><b>{pct(row.by_status.evidence_requires_clinician_review, row.total)}% review</b></div>
-            <div className="live-stackbar">{statuses.map((s) => row.by_status[s.key] ? <i key={s.key} title={`${s.label}: ${row.by_status[s.key]}`} style={{ width: `${(row.by_status[s.key] / row.total) * 100}%`, background: STATUS_COLORS[s.key] }} /> : null)}</div>
-            <small>{row.total} profiles</small>
-          </div>)}</div>
-        </article>
-        <article className="live-card">
-          <header><h3>Newest review alerts</h3><p>Created by the normal Sync → Analyse → Route scan</p></header>
-          <div className="live-alerts">{data.recent_alerts.length ? data.recent_alerts.map((alert: RecordValue) => <button key={alert.id} className="live-alert" onClick={() => alert.patient && setPatientId(alert.patient.id)}>
-            <span className="live-dot" style={{ background: STATUS_COLORS[alert.finding?.status] || "#999" }} />
-            <span><b>{alert.patient?.reference}</b><small>{alert.patient?.care_setting} · {statuses.find((s) => s.key === alert.finding?.status)?.label || alert.finding?.status}</small></span>
-            <span className="status-tag">{alert.status}</span>
-          </button>) : <div className="empty">No review alerts yet.</div>}</div>
-        </article>
-      </div>
+      <article className="live-card">
+        <header><h3>Newest review alerts</h3><p>Created by the normal Sync → Analyse → Route scan</p></header>
+        <div className="live-alerts">{data.recent_alerts.length ? data.recent_alerts.map((alert: RecordValue) => <button key={alert.id} className="live-alert" onClick={() => alert.patient && setPatientId(alert.patient.id)}>
+          <span className="live-dot" style={{ background: STATUS_COLORS[alert.finding?.status] || "#999" }} />
+          <span><b>{alert.patient?.reference}</b><small>{alert.patient?.care_setting} · {statuses.find((s) => s.key === alert.finding?.status)?.label || alert.finding?.status}</small></span>
+          <span className="status-tag">{alert.status}</span>
+        </button>) : <div className="empty">No review alerts yet.</div>}</div>
+      </article>
     </div>
     {compact ? <p className="live-footnote">Synthetic data — demonstration only. Accelerated simulated time; the monitor never diagnoses, prescribes, triages or contacts patients.</p> : <p className="live-footnote">Synthetic data — demonstration only. Simulated results use accelerated time and pass through the existing deterministic review tree; the monitor never diagnoses, prescribes, triages or contacts patients. {data.integrity_note}</p>}
   </section>;
@@ -162,27 +156,6 @@ function Kpi({ label, value, detail, delta, tone }: { label: string, value: Reac
 
 function Legend({ statuses }: { statuses: RecordValue[] }) {
   return <div className="live-legend">{statuses.map((s) => <span key={s.key}><i style={{ background: STATUS_COLORS[s.key] }} />{s.label}</span>)}</div>;
-}
-
-const LOINC_NAMES: Record<string, string> = { "4548-4": "HbA1c", "14749-6": "fasting glucose" };
-
-function PipelineFeed({ feed, statuses, running }: { feed: RecordValue[], statuses: RecordValue[], running: boolean }) {
-  const label = (key: string) => statuses.find((s) => s.key === key)?.label || key;
-  if (!feed.length) return <pre className="live-code"><span className="c">{running ? "-- Waiting for the first simulated step…" : "-- Idle. An administrator starts the simulation; each step is streamed here:"}</span>{"\n"}<span className="c">{"--   INSERT observations → SCAN sync → analyse → route → STATE changes"}</span></pre>;
-  return <pre className="live-code" aria-live="polite">{feed.map((step) => <div key={step.step} className="live-code-step">
-    <span className="c">{`-- step ${step.step} · simulated ${simDate(step.simulated_from)} → ${simDate(step.simulated_to)}`}</span>{"\n"}
-    <span className="k">INSERT INTO</span> observations (patient, loinc, value, unit, observed_at){"\n"}
-    {step.observations.map((row: RecordValue, i: number) => <span key={row.source_id}>
-      {i ? "     , " : "VALUES "}(<span className="s">'{row.patient}'</span>, <span className="s">'{row.loinc}'</span>, <span className="n">{Number(row.value).toFixed(1)}</span>, <span className="s">'{row.unit}'</span>, <span className="s">'{row.observed_at}'</span>)  <span className="c">{`-- ${LOINC_NAMES[row.loinc] || row.code}`}</span>{"\n"}
-    </span>)}
-    <span className="c">{step.observations_total > step.observations.length ? `     -- … ${step.observations_total - step.observations.length} more rows; ${step.observations_total} results written in this step` : `     -- ${step.observations_total} results written in this step`}</span>{"\n"}
-    <span className="k">SCAN</span> {(step.scan?.stages || []).map((stage: RecordValue, i: number) => <span key={stage.stage}>{i ? " → " : ""}<span className="f">{stage.stage}</span>({stage.stage === "sync" ? <span className="n">{stage.records_received}</span> : stage.stage === "analyse" ? <span className="n">{stage.patients_evaluated}</span> : <>+<span className="n">{stage.new_alerts}</span> alerts</>})</span>)}{"\n"}
-    {step.transitions.map((row: RecordValue) => <span key={row.patient}>
-      <span className="k">STATE</span> <span className="s">{row.patient}</span>  <span style={{ color: STATUS_COLORS[row.from] }}>{label(row.from)}</span> → <span style={{ color: STATUS_COLORS[row.to] }}>{label(row.to)}</span>{"\n"}
-    </span>)}
-    {step.transitions_total > step.transitions.length && <><span className="c">{`-- … ${step.transitions_total - step.transitions.length} more state changes (${step.transitions_total} total)`}</span>{"\n"}</>}
-    {!step.transitions_total && <><span className="c">-- no review-state changes in this step</span>{"\n"}</>}
-  </div>)}</pre>;
 }
 
 function TrendLines({ series, statuses }: { series: RecordValue[], statuses: RecordValue[] }) {
