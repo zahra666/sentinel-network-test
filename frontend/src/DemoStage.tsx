@@ -5,8 +5,8 @@ import "./demo.css";
 /*
  * Pitch-video stage: left, a terminal-style tail of the synthetic observations the
  * live simulation is writing; right, the compact Live Monitor reacting to them.
- * "Play story" resets the simulation and starts the scripted surge scenario
- * (baseline → surge → recovery → stable). Synthetic data only.
+ * "Play story" resets the simulation and starts the scripted catch-up storyline
+ * (routine → missed follow-ups → recall clinic → recovery → stable). Synthetic data only.
  */
 
 const API = import.meta.env.VITE_API_BASE_URL || "/api";
@@ -20,7 +20,8 @@ const SAMPLE_ROWS = 4;        // INSERT rows shown per step; the rest are summar
 const SAMPLE_ASSESSMENTS = 3; // review-state changes walked through per step
 const LOINC: Record<string, string> = { "4548-4": "HbA1c", "14749-6": "FPG" };
 const THRESHOLDS: Record<string, number> = { hba1c: 6.3, fpg: 7.0 };
-const PHASE_TONE: Record<string, string> = { baseline: "calm", surge: "hot", recovery: "warm", stable: "calm" };
+const PHASE_TONE: Record<string, string> = { routine: "calm", missed: "warm", catch_up: "hot", recovery: "warm", stable: "calm" };
+const SCENARIO = "catch_up";
 
 async function call(path: string, token: string, method = "GET", body?: RecordValue) {
   const response = await fetch(`${API}${path}`, { method, body: body ? JSON.stringify(body) : undefined, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` } });
@@ -98,7 +99,7 @@ export default function DemoStage({ token, onExit }: { token: string, onExit: ()
       await call("/live/simulation/reset", token, "POST");
       queue.current = []; primed.current = false;
       setLines([{ id: `boot-${Date.now()}`, kind: "info", text: "sentinel@api:~$ tail -f live_simulation.sql  # statements each step runs" }, { id: `start-${Date.now()}`, kind: "info", text: "-- connected · waiting for the first batch of synthetic lab results…" }]);
-      await call("/live/simulation/start", token, "POST", { tick_seconds: TICK_SECONDS, scenario: "surge" });
+      await call("/live/simulation/start", token, "POST", { tick_seconds: TICK_SECONDS, scenario: SCENARIO });
       primed.current = true; lastPhase.current = null; lastStep.current = 0;
       setMonitorKey((k) => k + 1);
     } catch (err: any) { setError(err.message); }
@@ -131,7 +132,7 @@ export default function DemoStage({ token, onExit }: { token: string, onExit: ()
         </div>
         <div className="demo-term-foot">Synthetic data — demonstration only · writes go through the normal Sync → Analyse → Route scan</div>
       </section>
-      <section className="demo-board"><LiveMonitor key={monitorKey} token={token} compact hideControls tickSeconds={TICK_SECONDS} scenario="surge" /></section>
+      <section className="demo-board"><LiveMonitor key={monitorKey} token={token} compact hideControls tickSeconds={TICK_SECONDS} scenario={SCENARIO} /></section>
     </div>
   </div>;
 }
@@ -145,12 +146,26 @@ function stepLines(step: RecordValue, statuses: RecordValue[]): Line[] {
   line("b", ["BEGIN", "k"], [";"]);
   line("i", ["INSERT INTO ", "k"], ["observations "], ["(patient, loinc, value, unit, observed_at, terminology_status)", "x"]);
   (step.observations || []).slice(0, SAMPLE_ROWS).forEach((row: RecordValue, i: number) => {
-    const high = row.value >= (THRESHOLDS[row.code] ?? Infinity);
-    line(`r${i}`, [i ? "     , " : "VALUES ", i ? "x" : "k"], ["("], [`'${row.patient}'`, "s"], [", "], [`'${row.loinc}'`, "s"], [", "], [Number(row.value).toFixed(1), high ? "n hi" : "n"], [", "], [`'${row.unit}'`, "s"], [", "], [`'${row.observed_at}'`, "s"], [", "], [`'${row.terminology_status}'`, "s"], [")"], [`  -- ${LOINC[row.loinc] || row.code}`, "c"]);
+    const bad = row.terminology_status !== "verified";
+    const high = !bad && row.value >= (THRESHOLDS[row.code] ?? Infinity);
+    line(`r${i}`, [i ? "     , " : "VALUES ", i ? "x" : "k"], ["("], [`'${row.patient}'`, "s"], [", "], [`'${row.loinc}'`, "s"], [", "], [Number(row.value).toFixed(1), bad ? "err" : high ? "n hi" : "n"], [", "], [`'${row.unit}'`, bad ? "err" : "s"], [", "], [`'${row.observed_at}'`, "s"], [", "], [`'${row.terminology_status}'`, bad ? "err" : "s"], [")"], [bad ? "  -- ⚠ wrong unit" : `  -- ${LOINC[row.loinc] || row.code}`, bad ? "err" : "c"]);
   });
+  if (step.rejected_total) {
+    line("w1", [`     -- ⚠ ${step.rejected_total} FPG in mg/dL; LOINC 14749-6 needs mmol/L`, "err"]);
+    line("w2", ["     -- ⚠ kept for audit, not used by rules → data_quality_review", "err"]);
+  }
   const more = (step.observations_total || 0) - Math.min(SAMPLE_ROWS, (step.observations || []).length);
   if (more > 0) line("m", [`     -- … ${more} more rows in this batch`, "c"]);
-  line("e", ["COMMIT", "k"], [";"], [`  -- ${step.observations_total} rows written`, "c"]);
+  if ((step.corrections || []).length) line("kh", ["INSERT INTO ", "k"], ["observations "], ["(patient, loinc, value, unit, version)  -- corrections", "x"]);
+  (step.corrections || []).forEach((row: RecordValue, i: number) => {
+    line(`k${i}`, [i ? "     , " : "VALUES ", i ? "x" : "k"], ["("], [`'${row.patient}'`, "s"], [", "], [`'${row.loinc}'`, "s"], [", "], [Number(row.value).toFixed(1), "n"], [", "], ["'mmol/L'", "s"], [", "], [`v${row.version}`, "n"], [")"], [`  -- ✓ was ${row.original_value} ${row.original_unit}`, "ok"]);
+  });
+  if (step.corrections_total) {
+    line("kx", [`     -- ✓ lab re-sent ${step.corrections_total} corrected FPG result(s) as v2`, "ok"]);
+    line("ky", ["     -- ✓ v1 kept for audit, v2 supersedes it → re-assessed", "ok"]);
+  }
+  if ((step.corrections_total || 0) > (step.corrections || []).length) line("km", [`     -- … ${step.corrections_total - step.corrections.length} more corrected results`, "c"]);
+  line("e", ["COMMIT", "k"], [";"], [`  -- ${step.observations_total} rows written${step.rejected_total ? `, ${step.rejected_total} with an invalid unit` : ""}${step.corrections_total ? `, ${step.corrections_total} corrections` : ""}`, step.rejected_total ? "err" : "c"]);
   const stages: RecordValue[] = step.scan?.stages || [];
   const stage = (name: string) => stages.find((item) => item.stage === name) || {};
   line("sc", [">>> ", "p"], ["scan", "v"], [" = "], ["execute_scan", "f"], ["(db, trigger="], ['"live_simulation"', "s"], [")"]);
@@ -161,6 +176,7 @@ function stepLines(step: RecordValue, statuses: RecordValue[]): Line[] {
     line(`a${i}v`, ["   ", ""], ...check("hba1c", row.hba1c, THRESHOLDS.hba1c), ["  "], ...check("fpg", row.fpg, THRESHOLDS.fpg));
     line(`a${i}t`, ["    "], [label(row.from), `st ${row.from}`], [" → "], [label(row.to), `st ${row.to}`]);
   });
+  if (step.overdue !== null && step.overdue !== undefined) line("od", [">>> ", "p"], ["overdue_hba1c", "f"], ["(days="], ["90", "n"], [") → "], [String(step.overdue), step.overdue > 50 ? "n hi" : "n"], [" profiles with no HbA1c in the last 90 days", "c"]);
   const others = (step.transitions_total || 0) - Math.min(SAMPLE_ASSESSMENTS, (step.transitions || []).length);
   line("t", [step.transitions_total ? `-- ${step.transitions_total} profiles changed review state${others > 0 ? ` (${others} not shown)` : ""}` : "-- no review-state changes this step", "c"]);
   line("z", [" "]);

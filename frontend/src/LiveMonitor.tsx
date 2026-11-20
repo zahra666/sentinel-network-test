@@ -23,7 +23,7 @@ const pct = (part: number, total: number) => (total ? Math.round((part / total) 
 const simDate = (iso?: string | null) => iso ? new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
 const klTime = (date: Date) => `${date.toLocaleTimeString("en-GB", { timeZone: "Asia/Kuala_Lumpur" })} MYT`;
 
-type LiveMonitorProps = { token: string, compact?: boolean, tickSeconds?: number, scenario?: "steady" | "surge", hideControls?: boolean, onDemo?: () => void };
+type LiveMonitorProps = { token: string, compact?: boolean, tickSeconds?: number, scenario?: "steady" | "catch_up" | "surge", hideControls?: boolean, onDemo?: () => void };
 
 export default function LiveMonitor({ token, compact = false, tickSeconds, scenario, hideControls = false, onDemo }: LiveMonitorProps) {
   const [data, setData] = useState<RecordValue | null>(null);
@@ -101,7 +101,9 @@ export default function LiveMonitor({ token, compact = false, tickSeconds, scena
     {alarm && <div className="live-alarm" role="status"><b>Review workload alert</b> {reviewPct}% of monitored profiles now need clinician review (run baseline {baselinePct}%). Review queue is filling faster than usual.</div>}
 
     <div className="live-kpis">
-      <Kpi label="Monitored profiles" value={current.total} detail="Synthetic T2DM records in scope" />
+      {compact && current.overdue !== null && current.overdue !== undefined
+        ? <Kpi label={`Overdue HbA1c (>${current.overdue_days} days)`} value={current.overdue} detail={`of ${current.total} monitored profiles`} delta={previous && previous.overdue !== null ? current.overdue - previous.overdue : null} tone={current.overdue > current.total * 0.2 ? "amber" : undefined} />
+        : <Kpi label="Monitored profiles" value={current.total} detail={current.overdue !== null && current.overdue !== undefined ? `${current.overdue} overdue for HbA1c (>${current.overdue_days} days)` : "Synthetic T2DM records in scope"} />}
       <Kpi label="Clinician review required" value={`${reviewPct}%`} detail={`${review} profiles`} delta={previous ? review - previous.by_status.evidence_requires_clinician_review : null} tone="coral" />
       <Kpi label="Confirmation gap" value={`${pct(gap, current.total)}%`} detail={`${gap} profiles`} delta={previous ? gap - previous.by_status.confirmation_gap : null} tone="amber" />
       {compact

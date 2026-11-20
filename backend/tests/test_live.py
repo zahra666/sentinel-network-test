@@ -117,24 +117,35 @@ def test_seed_cohort_size_scales_care_mix():
         assert [(org, setting) for org, setting, _ in matrix] == [(org, setting) for org, setting, _ in BASE_CARE_MATRIX]
 
 
-def test_surge_scenario_rises_then_recovers():
+def test_catch_up_storyline_tension_then_relief():
     from app.live import serialize_run, surge_phase
 
-    assert [surge_phase(t)["key"] for t in (1, 4, 5, 11, 12, 18, 19, 40)] == ["baseline", "baseline", "surge", "surge", "recovery", "recovery", "stable", "stable"]
+    assert [surge_phase(t)["key"] for t in (1, 3, 4, 9, 10, 14, 15, 20, 21, 40)] == [
+        "routine", "routine", "missed", "missed", "catch_up", "catch_up", "recovery", "recovery", "stable", "stable"]
     with SessionLocal() as db:
         admin = _user(db, "admin@sentinel.demo")
         reset_simulation(db, admin)
-        run = start_run(db, admin, StartPayload(tick_seconds=2, scenario="surge"))
+        run = start_run(db, admin, StartPayload(tick_seconds=2, scenario="surge"))  # legacy alias
         db.commit()
-        review = []
-        for _ in range(18):
+        assert run.simulated_days_per_tick == 14
+        review, quality, overdue, corrections = [], [], [], 0
+        for _ in range(20):
             simulation_tick(db, run)
-            current = build_dashboard(db, admin)["current"]
+            view = build_dashboard(db, admin)
+            current = view["current"]
             review.append(current["by_status"]["evidence_requires_clinician_review"] / current["total"])
+            quality.append(current["by_status"]["data_quality_review"] / current["total"])
+            overdue.append(current["overdue"])
+            corrections += view["feed"][0]["corrections_total"]
         db.commit()
         assert serialize_run(run, db)["phase"] == "recovery"
-        peak = max(review[4:11])
-        assert peak > review[3] + 0.2      # surge clearly above baseline
-        assert review[-1] < peak - 0.2     # recovery clearly below the peak
+        assert overdue[8] > overdue[2] + 50                      # missed follow-ups: overdue climbs
+        assert overdue[13] < overdue[8] // 2                       # recall clinic clears the backlog
+        assert max(review[9:14]) > review[8] + 0.1                 # tension: review share jumps
+        assert max(quality[9:14]) > quality[8] + 0.03              # wrong-unit batch is caught
+        assert corrections > 0 and quality[-1] < max(quality[9:14]) # corrected results resolve it
+        assert review[-1] < max(review[9:14])                      # relief afterwards
+        corrected = db.scalars(select(Observation).where(Observation.is_corrected.is_(True), Observation.source_id.like("SIM-%"))).all()
+        assert corrected and all(item.version == 2 and item.corrects_observation_id and item.terminology_status == "verified" for item in corrected)
         reset_simulation(db, admin)
         db.commit()

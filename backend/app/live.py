@@ -55,20 +55,33 @@ _runner_started = False
 class StartPayload(BaseModel):
     tick_seconds: int | None = Field(default=None, ge=2, le=60)
     simulated_days_per_tick: int | None = Field(default=None, ge=1, le=30)
-    scenario: Literal["steady", "surge"] = "steady"
+    # "catch_up" is the pitch storyline; "surge" is kept as an alias for older clients.
+    scenario: Literal["steady", "catch_up", "surge"] = "steady"
 
 
 # --------------------------------------------------------------------------- pitch storyline
-# "surge" is a scripted demo storyline over simulated time: a calm baseline, a burst of
-# synthetic test results with higher values in a susceptible subset, then recovery.
+# "catch_up" is a scripted demo storyline over simulated time, loosely grounded in Malaysian
+# follow-up patterns (routine 3-6-monthly HbA1c; missed follow-ups followed by recall):
+#   routine  -> results arrive as booked
+#   missed   -> follow-ups lapse, few results arrive, "overdue for HbA1c" climbs (tension builds)
+#   catch_up -> recall clinic: a backlog of results lands at once; a subset whose control
+#               slipped while unmonitored returns higher values; one lab batch carries the
+#               wrong glucose unit, which the terminology gate rejects (data-quality review)
+#   recovery -> queue clears, values ease, the lab re-sends corrected results (version 2)
+#   stable   -> routine follow-up again
 # Values still pass through the unchanged deterministic review tree; only the synthetic
 # input stream is shaped. Phase boundaries are inclusive tick numbers.
-SURGE_PHASES = [
-    {"key": "baseline", "label": "Baseline · steady state", "until": 4, "probability": 0.35, "offset": (-0.2, -0.4), "share": 1.0, "ramp": 1},
-    {"key": "surge", "label": "Surge · result influx", "until": 11, "probability": 1.0, "offset": (1.6, 3.2), "share": 0.6, "ramp": 4},
-    {"key": "recovery", "label": "Recovery · values easing", "until": 18, "probability": 0.8, "offset": (-0.4, -0.8), "share": 1.0, "ramp": 1},
-    {"key": "stable", "label": "Stable · back to baseline", "until": None, "probability": 0.35, "offset": (-0.2, -0.4), "share": 1.0, "ramp": 1},
+SCENARIO_PHASES = [
+    {"key": "routine", "label": "Routine follow-up · results arriving as booked", "until": 3, "probability": 0.30, "offset": (0.0, 0.0), "share": 1.0, "ramp": 1},
+    {"key": "missed", "label": "Missed follow-ups · results stop arriving", "until": 9, "probability": 0.04, "offset": (0.0, 0.0), "share": 1.0, "ramp": 1},
+    {"key": "catch_up", "label": "Recall clinic · backlog of results lands", "until": 14, "probability": 0.90, "offset": (0.8, 1.4), "share": 0.45, "ramp": 2, "unit_error_rate": 0.03},
+    {"key": "recovery", "label": "Recovery · queue clearing, corrected results re-sent", "until": 20, "probability": 0.45, "offset": (-0.3, -0.5), "share": 1.0, "ramp": 1, "corrections": True},
+    {"key": "stable", "label": "Routine follow-up · back to normal", "until": None, "probability": 0.30, "offset": (-0.1, -0.2), "share": 1.0, "ramp": 1},
 ]
+SCENARIO_DAYS_PER_TICK = 14
+OVERDUE_DAYS = 90  # illustrative "HbA1c every 3-6 months" monitoring window
+MG_DL_PER_MMOL_L = 18.0156
+SURGE_PHASES = SCENARIO_PHASES  # backwards-compatible name
 _scenario_cache: dict[str, str] = {}
 
 
@@ -77,17 +90,18 @@ def run_scenario(db: Session, run: SimulationRun) -> str:
     if run.id not in _scenario_cache:
         event = db.scalar(select(AuditEvent).where(AuditEvent.event_type == "live.simulation_started", AuditEvent.entity_id == run.id))
         _scenario_cache[run.id] = ((event.detail or {}).get("scenario") if event else None) or "steady"
-    return _scenario_cache[run.id]
+    scenario = _scenario_cache[run.id]
+    return "catch_up" if scenario == "surge" else scenario
 
 
 def surge_phase(tick: int) -> dict:
-    return next(phase for phase in SURGE_PHASES if phase["until"] is None or tick <= phase["until"])
+    return next(phase for phase in SCENARIO_PHASES if phase["until"] is None or tick <= phase["until"])
 
 
 def surge_shift(tick: int) -> tuple[float, float]:
     """Phase offset, ramped in over the first ticks of a phase so the curve builds rather than jumps."""
-    index = SURGE_PHASES.index(phase := surge_phase(tick))
-    start = SURGE_PHASES[index - 1]["until"] + 1 if index else 1
+    index = SCENARIO_PHASES.index(phase := surge_phase(tick))
+    start = SCENARIO_PHASES[index - 1]["until"] + 1 if index else 1
     scale = min(1.0, (tick - start + 1) / phase["ramp"])
     return phase["offset"][0] * scale, phase["offset"][1] * scale
 
@@ -162,19 +176,35 @@ def _next_value(last: float, target: float, kind: str, wave: float, rng: random.
     return round(min(high, max(low, value)), 1)
 
 
-def _observation(patient: Patient, run: SimulationRun, code: str, value: float, unit: str, observed_at: datetime) -> Observation:
+def _observation(patient: Patient, run: SimulationRun, code: str, value: float, unit: str, observed_at: datetime,
+                 *, source_id: str | None = None, version: int = 1, corrects: Observation | None = None) -> Observation:
     loinc, local = {"hba1c": ("4548-4", "HBA1C"), "fpg": ("14749-6", "FPG")}[code]
     try:
         mapping = map_measurement(system=LOINC_SYSTEM, code=loinc, display=None, version=LOINC_VERSION, original_code=local, value=value, ucum_unit=unit)
-    except TerminologyError:  # pragma: no cover - the simulator only emits catalogue units
-        raise
+    except TerminologyError as exc:
+        # Same handling as the seed's inconsistent-unit fixture: the source value is kept,
+        # but it is never normalised or compared; the review tree routes it to data-quality review.
+        mapping = {
+            "coding_system": LOINC_SYSTEM, "standard_code": loinc, "coding_display": None, "terminology_version": LOINC_VERSION,
+            "original_code": local, "clinical_key": None, "terminology_status": "unit_incompatible",
+            "normalised_value": None, "normalised_ucum_unit": None, "conversion_provenance": {"reason": str(exc)},
+        }
     return Observation(
         patient_id=patient.id, code=code, value=value, unit=unit, observed_at=observed_at, ingested_at=now_utc(),
-        source_id=f"{SIM_SOURCE_PREFIX}{run.id[:8]}-{run.ticks:05d}-{patient.reference}-{code}", version=1,
-        ucum_unit=unit, result_status="final",
+        source_id=source_id or f"{SIM_SOURCE_PREFIX}{run.id[:8]}-{run.ticks:05d}-{patient.reference}-{code}", version=version,
+        is_corrected=corrects is not None, corrects_observation_id=corrects.id if corrects is not None else None,
+        ucum_unit=unit, result_status="corrected" if corrects is not None else "final",
         provenance={"source": "live monitor accelerated-time simulation", "synthetic_only": True, "simulated_time": True, "run_id": run.id, **mapping["conversion_provenance"]},
         **{key: mapping[key] for key in ("original_code", "coding_system", "standard_code", "coding_display", "terminology_version", "clinical_key", "terminology_status", "normalised_value", "normalised_ucum_unit")},
     )
+
+
+def _record(patient: Patient, item: Observation, code: str, value: float, unit: str, observed_at: datetime, **extra) -> dict:
+    return {
+        "organization_id": patient.organization_id, "patient": patient.reference, "care_setting": patient.care_setting,
+        "source_id": item.source_id, "loinc": item.standard_code, "code": code, "value": value, "unit": unit,
+        "observed_at": observed_at.date().isoformat(), "terminology_status": item.terminology_status, **extra,
+    }
 
 
 def simulation_tick(db: Session, run: SimulationRun) -> dict:
@@ -190,7 +220,7 @@ def simulation_tick(db: Session, run: SimulationRun) -> dict:
     elapsed_days = (as_utc(run.simulated_now) - as_utc(run.simulated_start)).days
     cohort_wave = 0.25 * math.sin(2 * math.pi * elapsed_days / 150)  # shared seasonal swing
     probability = min(1.0, days / max(1, settings.live_simulation_mean_test_interval_days))
-    phase = surge_phase(run.ticks) if run_scenario(db, run) == "surge" else None
+    phase = surge_phase(run.ticks) if run_scenario(db, run) == "catch_up" else None
     if phase:
         probability = phase["probability"]
 
@@ -211,15 +241,30 @@ def simulation_tick(db: Session, run: SimulationRun) -> dict:
                 shift = surge_shift(run.ticks)
         hba1c = _next_value(values.get("hba1c_ngsp", profile["hba1c_base"]), _target(profile, "hba1c", elapsed_days) + shift[0], "hba1c", wave, rng)
         fpg = _next_value(values.get("fpg", profile["fpg_base"]), _target(profile, "fpg", elapsed_days) + shift[1], "fpg", wave * 1.6, rng)
-        for code, value, unit in (("hba1c", hba1c, "%"), ("fpg", fpg, "mmol/L")):
+        fpg_value, fpg_unit = fpg, "mmol/L"
+        if phase and rng.random() < phase.get("unit_error_rate", 0.0):
+            fpg_value, fpg_unit = round(fpg * MG_DL_PER_MMOL_L), "mg/dL"  # lab sent mass units under the molar LOINC code
+        for code, value, unit in (("hba1c", hba1c, "%"), ("fpg", fpg_value, fpg_unit)):
             item = _observation(patient, run, code, value, unit, observed_at)
             db.add(item)
-            records.append({
-                "organization_id": patient.organization_id, "patient": patient.reference, "care_setting": patient.care_setting,
-                "source_id": item.source_id, "loinc": item.standard_code, "code": code, "value": value, "unit": unit,
-                "observed_at": observed_at.date().isoformat(), "terminology_status": item.terminology_status,
-            })
+            records.append(_record(patient, item, code, value, unit, observed_at))
         written += 2
+    corrections: list[dict] = []
+    if phase and phase.get("corrections"):
+        rejected = db.execute(
+            select(Observation, Patient).join(Patient, Patient.id == Observation.patient_id)
+            .where(Observation.source_id.like(f"{SIM_SOURCE_PREFIX}{run.id[:8]}-%"), Observation.terminology_status == "unit_incompatible", Observation.version == 1)
+        ).all()
+        corrected_ids = set(db.scalars(select(Observation.corrects_observation_id).where(Observation.corrects_observation_id.is_not(None))).all())
+        for original, patient in rejected:
+            if original.id in corrected_ids:
+                continue
+            value = round(original.value / MG_DL_PER_MMOL_L, 1)
+            observed_at = as_utc(original.observed_at)
+            item = _observation(patient, run, original.code, value, "mmol/L", observed_at, source_id=original.source_id, version=original.version + 1, corrects=original)
+            db.add(item)
+            corrections.append(_record(patient, item, original.code, value, "mmol/L", observed_at, version=item.version, original_value=original.value, original_unit=original.unit))
+            written += 1
     db.flush()
     # Reload from the database so every timestamp compares consistently (SQLite returns naive UTC).
     db.expire_all()
@@ -239,7 +284,7 @@ def simulation_tick(db: Session, run: SimulationRun) -> dict:
     snapshot.events = {
         "step": run.ticks, "phase": phase["key"] if phase else None, "phase_label": phase["label"] if phase else None,
         "simulated_from": previous.isoformat(), "simulated_to": as_utc(run.simulated_now).isoformat(),
-        "observations": records, "transitions": transitions,
+        **(snapshot.events or {}), "observations": records, "corrections": corrections, "transitions": transitions,
         "scan": {"id": scan.id, "stages": scan.events, "new_alerts": scan.finding_count},
     }
     return {"tick": run.ticks, "phase": phase["key"] if phase else None, "observations_written": written, "new_alerts": scan.finding_count, "snapshot_id": snapshot.id, "simulated_now": as_utc(run.simulated_now).isoformat()}
@@ -257,8 +302,16 @@ def capture_snapshot(db: Session, run: SimulationRun | None, scan: Scan | None) 
         select(Patient.organization_id, func.count(Alert.id)).join(Patient, Patient.id == Alert.patient_id)
         .where(Alert.status == "new").group_by(Patient.organization_id)
     ).all())
+    overdue: dict[str, int] = {}
+    if run is not None:
+        cutoff = as_utc(run.simulated_now) - timedelta(days=OVERDUE_DAYS)
+        last_hba1c = dict(db.execute(select(Observation.patient_id, func.max(Observation.observed_at)).where(Observation.code == "hba1c").group_by(Observation.patient_id)).all())
+        for patient, _ in analyses:
+            seen = as_utc(last_hba1c.get(patient.id))
+            if seen is None or seen < cutoff:
+                overdue[patient.organization_id] = overdue.get(patient.organization_id, 0) + 1
     snapshot = LiveStatusSnapshot(
-        run_id=run.id if run else None, scan_id=scan.id if scan else None,
+        run_id=run.id if run else None, scan_id=scan.id if scan else None, events={"overdue": overdue} if run is not None else {},
         simulated_at=as_utc(run.simulated_now) if run else None,
         counts=[{"organization_id": org, "care_setting": setting, "status": status, "patients": n} for (org, setting, status), n in sorted(counter.items())],
         open_alerts=open_alerts,
@@ -278,7 +331,7 @@ def start_run(db: Session, user: User, payload: StartPayload) -> SimulationRun:
         started_by=user.id, status="running",
         expires_at=now_utc() + timedelta(minutes=settings.live_simulation_max_minutes),
         tick_seconds=payload.tick_seconds or settings.live_simulation_tick_seconds,
-        simulated_days_per_tick=payload.simulated_days_per_tick or settings.live_simulation_days_per_tick,
+        simulated_days_per_tick=payload.simulated_days_per_tick or (SCENARIO_DAYS_PER_TICK if payload.scenario in {"catch_up", "surge"} else settings.live_simulation_days_per_tick),
         simulated_start=start, simulated_now=start,
     )
     db.add(run)
@@ -359,6 +412,12 @@ def start_background_runner() -> None:
 # --------------------------------------------------------------------------- read model
 
 
+def _scoped_sum(per_org: dict | None, organization_id: str | None) -> int | None:
+    if per_org is None:
+        return None
+    return per_org.get(organization_id, 0) if organization_id else sum(per_org.values())
+
+
 def _blank() -> dict[str, int]:
     return {key: 0 for key in STATUS_KEYS}
 
@@ -384,7 +443,7 @@ def serialize_run(run: SimulationRun | None, db: Session | None = None) -> dict 
     if not run:
         return None
     scenario = run_scenario(db, run) if db is not None else _scenario_cache.get(run.id, "steady")
-    phase = surge_phase(run.ticks) if scenario == "surge" and run.ticks else None
+    phase = surge_phase(run.ticks) if scenario == "catch_up" and run.ticks else None
     return {
         "scenario": scenario, "phase": phase["key"] if phase else None, "phase_label": phase["label"] if phase else None,
         "id": run.id, "status": run.status, "ticks": run.ticks, "tick_seconds": run.tick_seconds,
@@ -435,6 +494,7 @@ def build_dashboard(db: Session, user: User, points: int = 72) -> dict:
             "simulated_at": as_utc(snap.simulated_at).isoformat() if snap.simulated_at else None,
             "by_status": _by_status(_scoped(snap.counts, org_id)),
             "open_alerts": alerts.get(org_id, 0) if org_id else sum(alerts.values()),
+            "overdue": _scoped_sum((snap.events or {}).get("overdue"), org_id),
         })
 
     feed = []
@@ -445,10 +505,16 @@ def build_dashboard(db: Session, user: User, points: int = 72) -> dict:
         observations = [row for row in events.get("observations", []) if org_id is None or row["organization_id"] == org_id]
         transitions = [row for row in events.get("transitions", []) if org_id is None or row["organization_id"] == org_id]
         strip = lambda rows: [{k: v for k, v in row.items() if k != "organization_id"} for row in rows]
+        corrections = [row for row in events.get("corrections", []) if org_id is None or row["organization_id"] == org_id]
+        rejected = [row for row in observations if row.get("terminology_status") != "verified"]
+        sample = (rejected + [row for row in observations if row.get("terminology_status") == "verified"])[:4]
         feed.append({
-            "step": events.get("step"), "simulated_from": events.get("simulated_from"), "simulated_to": events.get("simulated_to"),
-            "observations_total": len(observations), "observations": strip(observations[:4]),
+            "step": events.get("step"), "phase": events.get("phase"), "phase_label": events.get("phase_label"),
+            "simulated_from": events.get("simulated_from"), "simulated_to": events.get("simulated_to"),
+            "observations_total": len(observations), "observations": strip(sample), "rejected_total": len(rejected),
+            "corrections_total": len(corrections), "corrections": strip(corrections[:4]),
             "transitions_total": len(transitions), "transitions": strip(transitions[:5]),
+            "overdue": _scoped_sum(events.get("overdue"), org_id),
             "scan": events.get("scan", {}),
         })
 
@@ -459,7 +525,8 @@ def build_dashboard(db: Session, user: User, points: int = 72) -> dict:
         "scope": {"organization": organization.name if organization else "All hospitals", "role": user.role},
         "statuses": STATUSES,
         "simulation": {**(serialize_run(run, db) or {}), "available": get_settings().live_simulation_enabled, "can_control": user.role == "administrator"},
-        "current": {"total": sum(current.values()), "by_status": current, "open_alerts": db.scalar(open_query) or 0},
+        "current": {"total": sum(current.values()), "by_status": current, "open_alerts": db.scalar(open_query) or 0,
+                    "overdue": series[-1]["overdue"] if series else None, "overdue_days": OVERDUE_DAYS},
         "series": series,
         "by_setting": [{"care_setting": name, "total": sum(values.values()), "by_status": values} for name, values in sorted(by_setting.items())],
         "recent_alerts": [serialize_alert(alert, db) for alert in recent],
