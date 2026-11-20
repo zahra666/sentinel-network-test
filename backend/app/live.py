@@ -78,14 +78,31 @@ def latest_run(db: Session) -> SimulationRun | None:
     return db.scalar(select(SimulationRun).where(SimulationRun.status != "reset").order_by(SimulationRun.started_at.desc()))
 
 
-def _trajectory(reference: str) -> str:
-    """Stable per-patient synthetic trajectory so trends look longitudinal, not random noise."""
-    bucket = int(hashlib.sha256(reference.encode()).hexdigest(), 16) % 20
-    if bucket < 4:
-        return "rising"
-    if bucket < 7:
-        return "falling"
-    return "stable"
+def _profile(reference: str) -> dict:
+    """Stable per-patient synthetic profile so trends look longitudinal, not white noise.
+
+    Each fictional T2DM profile gets its own glycaemic baseline (spread around the
+    illustrative rule thresholds), a long-run trajectory and a personal cycle phase.
+    """
+    digest = int(hashlib.sha256(reference.encode()).hexdigest(), 16)
+    bucket = (digest // 10**6) % 20
+    trajectory = "rising" if bucket < 5 else "falling" if bucket < 9 else "stable"
+    return {
+        "trajectory": trajectory,
+        "hba1c_base": 5.4 + 1.5 * ((digest % 1000) / 1000),       # 5.4-6.9 %
+        "fpg_base": 4.8 + 2.8 * (((digest // 1000) % 1000) / 1000),  # 4.8-7.6 mmol/L
+        "phase": ((digest // 10**8) % 360) * math.pi / 180,
+    }
+
+
+SLOPES = {"hba1c": {"rising": 0.12, "falling": -0.10, "stable": 0.0}, "fpg": {"rising": 0.18, "falling": -0.15, "stable": 0.0}}
+LIMITS = {"hba1c": (5.0, 10.5, 0.22), "fpg": (4.3, 13.0, 0.45)}  # low, high, measurement noise
+
+
+def _target(profile: dict, kind: str, elapsed_days: float) -> float:
+    low, high, _ = LIMITS[kind]
+    base = profile[f"{kind}_base"] + SLOPES[kind][profile["trajectory"]] * elapsed_days / 30
+    return min(high - 0.5, max(low + 0.4, base))
 
 
 def _latest_values(db: Session) -> dict[str, dict[str, float]]:
@@ -102,15 +119,9 @@ def _latest_values(db: Session) -> dict[str, dict[str, float]]:
     return {pid: {key: pair[1] for key, pair in values.items()} for pid, values in latest.items()}
 
 
-def _next_value(last: float, trajectory: str, kind: str, wave: float, rng: random.Random) -> float:
-    if kind == "hba1c":
-        step = {"rising": 0.18, "falling": -0.12, "stable": 0.0}[trajectory]
-        target, noise, low, high = 5.9, 0.12, 4.8, 11.5
-    else:
-        step = {"rising": 0.25, "falling": -0.18, "stable": 0.0}[trajectory]
-        target, noise, low, high = 5.6, 0.25, 4.0, 14.0
-    reversion = -0.15 * (last - target) if trajectory == "stable" else 0.0
-    value = last + step + reversion + wave + rng.gauss(0, noise)
+def _next_value(last: float, target: float, kind: str, wave: float, rng: random.Random) -> float:
+    low, high, noise = LIMITS[kind]
+    value = last + 0.5 * (target - last) + wave + rng.gauss(0, noise)
     return round(min(high, max(low, value)), 1)
 
 
@@ -140,7 +151,7 @@ def simulation_tick(db: Session, run: SimulationRun) -> dict:
     run.simulated_now = previous + timedelta(days=days)
     rng = random.Random(f"{run.id}:{run.ticks}")
     elapsed_days = (as_utc(run.simulated_now) - as_utc(run.simulated_start)).days
-    wave = 0.08 * math.sin(2 * math.pi * elapsed_days / 120)
+    cohort_wave = 0.25 * math.sin(2 * math.pi * elapsed_days / 150)  # shared seasonal swing
     probability = min(1.0, days / max(1, settings.live_simulation_mean_test_interval_days))
 
     latest = _latest_values(db)
@@ -148,11 +159,12 @@ def simulation_tick(db: Session, run: SimulationRun) -> dict:
     for patient in db.scalars(select(Patient).order_by(Patient.reference)).all():
         if rng.random() >= probability:
             continue
-        trajectory = _trajectory(patient.reference)
+        profile = _profile(patient.reference)
         values = latest.get(patient.id, {})
         observed_at = previous + timedelta(days=rng.randint(1, days), hours=rng.randint(7, 16))
-        hba1c = _next_value(values.get("hba1c_ngsp", 6.0), trajectory, "hba1c", wave, rng)
-        fpg = _next_value(values.get("fpg", 5.6), trajectory, "fpg", wave * 1.5, rng)
+        wave = cohort_wave + 0.15 * math.sin(2 * math.pi * elapsed_days / 90 + profile["phase"])
+        hba1c = _next_value(values.get("hba1c_ngsp", profile["hba1c_base"]), _target(profile, "hba1c", elapsed_days), "hba1c", wave, rng)
+        fpg = _next_value(values.get("fpg", profile["fpg_base"]), _target(profile, "fpg", elapsed_days), "fpg", wave * 1.6, rng)
         db.add(_observation(patient, run, "hba1c", hba1c, "%", observed_at))
         db.add(_observation(patient, run, "fpg", fpg, "mmol/L", observed_at))
         written += 2

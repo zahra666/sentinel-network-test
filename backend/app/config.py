@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     live_simulation_tick_seconds: int = 5
     live_simulation_days_per_tick: int = 7
     live_simulation_max_minutes: int = 30
-    live_simulation_mean_test_interval_days: int = 60
+    live_simulation_mean_test_interval_days: int = 30
     chain_rpc_url: str = ""
     chain_private_key: str = ""
     chain_contract_address: str = ""

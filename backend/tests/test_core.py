@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_sentinel.db"
 os.environ["APP_SECRET"] = "test-secret"
+os.environ["SEED_PATIENT_COUNT"] = "100"  # tests use the documented cohort even if .env sets another size
 
 import pytest
 from fastapi import HTTPException

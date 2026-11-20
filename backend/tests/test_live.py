@@ -2,6 +2,7 @@ import os
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_sentinel.db")
 os.environ.setdefault("APP_SECRET", "test-secret")
+os.environ["SEED_PATIENT_COUNT"] = "100"
 
 import pytest
 from fastapi import HTTPException
