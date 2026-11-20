@@ -341,6 +341,8 @@ class SimulationRun(Base):
     ticks: Mapped[int] = mapped_column(Integer, default=0)
     observations_written: Mapped[int] = mapped_column(Integer, default=0)
     error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # patient_id -> review state after the latest step, used to report state transitions.
+    last_statuses: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class LiveStatusSnapshot(Base):
@@ -356,3 +358,5 @@ class LiveStatusSnapshot(Base):
     # [{"organization_id", "care_setting", "status", "patients"}] plus per-organisation open alerts.
     counts: Mapped[list] = mapped_column(JSON, default=list)
     open_alerts: Mapped[dict] = mapped_column(JSON, default=dict)
+    # What this step actually did: written observations, scan stage counts, state transitions.
+    events: Mapped[dict] = mapped_column(JSON, default=dict)

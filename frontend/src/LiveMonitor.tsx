@@ -110,18 +110,14 @@ export default function LiveMonitor({ token, compact = false, tickSeconds, scena
     </div>
 
     <div className="live-grid">
+      {!compact && <article className="live-card live-feed">
+        <header><h3>Live data pipeline</h3><p>What each simulated step actually wrote to the database and evaluated — newest first</p></header>
+        <PipelineFeed feed={data.feed || []} statuses={statuses} running={running} />
+      </article>}
       <article className="live-card">
-        <header><h3>Review-state mix over simulated time</h3><p>Share of monitored profiles in each deterministic CPG review state</p></header>
+        <header><h3>Review-state trend</h3><p>Share of monitored profiles in each deterministic CPG review state, per simulated step</p></header>
         <Legend statuses={statuses} />
-        <StackedArea series={series} statuses={statuses} />
-      </article>
-      <article className="live-card">
-        <header><h3>By care setting</h3><p>Current review-state mix</p></header>
-        <div className="live-settings">{data.by_setting.map((row: RecordValue) => <div key={row.care_setting} className="live-setting">
-          <div className="live-setting-head"><span>{row.care_setting}</span><b>{pct(row.by_status.evidence_requires_clinician_review, row.total)}% review</b></div>
-          <div className="live-stackbar">{statuses.map((s) => row.by_status[s.key] ? <i key={s.key} title={`${s.label}: ${row.by_status[s.key]}`} style={{ width: `${(row.by_status[s.key] / row.total) * 100}%`, background: STATUS_COLORS[s.key] }} /> : null)}</div>
-          <small>{row.total} profiles</small>
-        </div>)}</div>
+        <TrendLines series={series} statuses={statuses} />
       </article>
     </div>
 
@@ -137,14 +133,24 @@ export default function LiveMonitor({ token, compact = false, tickSeconds, scena
           <p className="live-footnote">Dashed line: illustrative demo rule threshold, not clinical guidance.</p>
         </> : <div className="empty">Select a synthetic profile.</div>}
       </article>}
-      <article className="live-card">
-        <header><h3>Newest review alerts</h3><p>Created by the normal Sync → Analyse → Route scan</p></header>
-        <div className="live-alerts">{data.recent_alerts.length ? data.recent_alerts.map((alert: RecordValue) => <button key={alert.id} className="live-alert" onClick={() => alert.patient && setPatientId(alert.patient.id)}>
-          <span className="live-dot" style={{ background: STATUS_COLORS[alert.finding?.status] || "#999" }} />
-          <span><b>{alert.patient?.reference}</b><small>{alert.patient?.care_setting} · {statuses.find((s) => s.key === alert.finding?.status)?.label || alert.finding?.status}</small></span>
-          <span className="status-tag">{alert.status}</span>
-        </button>) : <div className="empty">No review alerts yet.</div>}</div>
-      </article>
+      <div className="live-stack">
+        <article className="live-card">
+          <header><h3>By care setting</h3><p>Current review-state mix</p></header>
+          <div className="live-settings">{data.by_setting.map((row: RecordValue) => <div key={row.care_setting} className="live-setting">
+            <div className="live-setting-head"><span>{row.care_setting}</span><b>{pct(row.by_status.evidence_requires_clinician_review, row.total)}% review</b></div>
+            <div className="live-stackbar">{statuses.map((s) => row.by_status[s.key] ? <i key={s.key} title={`${s.label}: ${row.by_status[s.key]}`} style={{ width: `${(row.by_status[s.key] / row.total) * 100}%`, background: STATUS_COLORS[s.key] }} /> : null)}</div>
+            <small>{row.total} profiles</small>
+          </div>)}</div>
+        </article>
+        <article className="live-card">
+          <header><h3>Newest review alerts</h3><p>Created by the normal Sync → Analyse → Route scan</p></header>
+          <div className="live-alerts">{data.recent_alerts.length ? data.recent_alerts.map((alert: RecordValue) => <button key={alert.id} className="live-alert" onClick={() => alert.patient && setPatientId(alert.patient.id)}>
+            <span className="live-dot" style={{ background: STATUS_COLORS[alert.finding?.status] || "#999" }} />
+            <span><b>{alert.patient?.reference}</b><small>{alert.patient?.care_setting} · {statuses.find((s) => s.key === alert.finding?.status)?.label || alert.finding?.status}</small></span>
+            <span className="status-tag">{alert.status}</span>
+          </button>) : <div className="empty">No review alerts yet.</div>}</div>
+        </article>
+      </div>
     </div>
     {compact ? <p className="live-footnote">Synthetic data — demonstration only. Accelerated simulated time; the monitor never diagnoses, prescribes, triages or contacts patients.</p> : <p className="live-footnote">Synthetic data — demonstration only. Simulated results use accelerated time and pass through the existing deterministic review tree; the monitor never diagnoses, prescribes, triages or contacts patients. {data.integrity_note}</p>}
   </section>;
@@ -158,23 +164,42 @@ function Legend({ statuses }: { statuses: RecordValue[] }) {
   return <div className="live-legend">{statuses.map((s) => <span key={s.key}><i style={{ background: STATUS_COLORS[s.key] }} />{s.label}</span>)}</div>;
 }
 
-function StackedArea({ series, statuses }: { series: RecordValue[], statuses: RecordValue[] }) {
-  const W = 640, H = 220, L = 34, R = 8, T = 8, B = 26;
+const LOINC_NAMES: Record<string, string> = { "4548-4": "HbA1c", "14749-6": "fasting glucose" };
+
+function PipelineFeed({ feed, statuses, running }: { feed: RecordValue[], statuses: RecordValue[], running: boolean }) {
+  const label = (key: string) => statuses.find((s) => s.key === key)?.label || key;
+  if (!feed.length) return <pre className="live-code"><span className="c">{running ? "-- Waiting for the first simulated step…" : "-- Idle. An administrator starts the simulation; each step is streamed here:"}</span>{"\n"}<span className="c">{"--   INSERT observations → SCAN sync → analyse → route → STATE changes"}</span></pre>;
+  return <pre className="live-code" aria-live="polite">{feed.map((step) => <div key={step.step} className="live-code-step">
+    <span className="c">{`-- step ${step.step} · simulated ${simDate(step.simulated_from)} → ${simDate(step.simulated_to)}`}</span>{"\n"}
+    <span className="k">INSERT INTO</span> observations (patient, loinc, value, unit, observed_at){"\n"}
+    {step.observations.map((row: RecordValue, i: number) => <span key={row.source_id}>
+      {i ? "     , " : "VALUES "}(<span className="s">'{row.patient}'</span>, <span className="s">'{row.loinc}'</span>, <span className="n">{Number(row.value).toFixed(1)}</span>, <span className="s">'{row.unit}'</span>, <span className="s">'{row.observed_at}'</span>)  <span className="c">{`-- ${LOINC_NAMES[row.loinc] || row.code}`}</span>{"\n"}
+    </span>)}
+    <span className="c">{step.observations_total > step.observations.length ? `     -- … ${step.observations_total - step.observations.length} more rows; ${step.observations_total} results written in this step` : `     -- ${step.observations_total} results written in this step`}</span>{"\n"}
+    <span className="k">SCAN</span> {(step.scan?.stages || []).map((stage: RecordValue, i: number) => <span key={stage.stage}>{i ? " → " : ""}<span className="f">{stage.stage}</span>({stage.stage === "sync" ? <span className="n">{stage.records_received}</span> : stage.stage === "analyse" ? <span className="n">{stage.patients_evaluated}</span> : <>+<span className="n">{stage.new_alerts}</span> alerts</>})</span>)}{"\n"}
+    {step.transitions.map((row: RecordValue) => <span key={row.patient}>
+      <span className="k">STATE</span> <span className="s">{row.patient}</span>  <span style={{ color: STATUS_COLORS[row.from] }}>{label(row.from)}</span> → <span style={{ color: STATUS_COLORS[row.to] }}>{label(row.to)}</span>{"\n"}
+    </span>)}
+    {step.transitions_total > step.transitions.length && <><span className="c">{`-- … ${step.transitions_total - step.transitions.length} more state changes (${step.transitions_total} total)`}</span>{"\n"}</>}
+    {!step.transitions_total && <><span className="c">-- no review-state changes in this step</span>{"\n"}</>}
+  </div>)}</pre>;
+}
+
+function TrendLines({ series, statuses }: { series: RecordValue[], statuses: RecordValue[] }) {
+  const W = 640, H = 330, L = 34, R = 44, T = 10, B = 26;
   if (series.length < 2) return <div className="empty">The trend appears once a simulation has taken its first step.</div>;
+  const shares = series.map((point) => { const total = Object.values(point.by_status as Record<string, number>).reduce((a, b) => a + b, 0) || 1; return Object.fromEntries(statuses.map((s) => [s.key, (point.by_status[s.key] / total) * 100])); });
+  const top = Math.min(100, Math.ceil((Math.max(...shares.flatMap((row) => Object.values(row) as number[])) + 5) / 20) * 20);
   const x = (i: number) => L + (i / (series.length - 1)) * (W - L - R);
-  const y = (v: number) => T + (1 - v / 100) * (H - T - B);
-  const bands: { key: string, points: string }[] = [];
-  const base = series.map(() => 0);
-  statuses.forEach((s) => {
-    const lower = series.map((_, i) => [x(i), y(base[i])]);
-    series.forEach((point, i) => { const total = Object.values(point.by_status as Record<string, number>).reduce((a, b) => a + b, 0) || 1; base[i] += (point.by_status[s.key] / total) * 100; });
-    const upper = series.map((_, i) => [x(i), y(base[i])]);
-    bands.push({ key: s.key, points: [...upper, ...lower.reverse()].map((p) => p.join(",")).join(" ") });
-  });
+  const y = (v: number) => T + (1 - v / top) * (H - T - B);
+  const grid = [0, top / 4, top / 2, (3 * top) / 4, top];
   const ticks = [0, Math.floor((series.length - 1) / 2), series.length - 1];
-  return <svg className="live-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Stacked share of review states over simulated time">
-    {[0, 25, 50, 75, 100].map((v) => <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className="grid" /><text x={L - 6} y={y(v) + 3} textAnchor="end">{v}%</text></g>)}
-    {bands.map((band) => <polygon key={band.key} points={band.points} fill={STATUS_COLORS[band.key]} opacity={0.88} />)}
+  return <svg className="live-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Share of review states over simulated time">
+    {grid.map((v) => <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className="grid" /><text x={L - 6} y={y(v) + 3} textAnchor="end">{Math.round(v)}%</text></g>)}
+    {statuses.map((s) => <g key={s.key}>
+      <polyline points={shares.map((row, i) => `${x(i)},${y(row[s.key])}`).join(" ")} fill="none" stroke={STATUS_COLORS[s.key]} strokeWidth={s.key === "evidence_requires_clinician_review" ? 2.6 : 1.8} strokeLinejoin="round" />
+      <text x={W - R + 4} y={y(shares[shares.length - 1][s.key]) + 3} style={{ fill: STATUS_COLORS[s.key] }} className="end-label">{Math.round(shares[shares.length - 1][s.key])}%</text>
+    </g>)}
     {ticks.map((i) => <text key={i} x={x(i)} y={H - 6} textAnchor={i === 0 ? "start" : i === series.length - 1 ? "end" : "middle"}>{simDate(series[i].simulated_at)}</text>)}
   </svg>;
 }

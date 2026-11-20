@@ -15,7 +15,8 @@ create table public.simulation_runs (
   last_tick_at timestamptz,
   ticks integer not null default 0,
   observations_written integer not null default 0,
-  error_summary text
+  error_summary text,
+  last_statuses json not null default '{}'
 );
 
 create table public.live_status_snapshots (
@@ -25,7 +26,8 @@ create table public.live_status_snapshots (
   captured_at timestamptz not null default now(),
   simulated_at timestamptz,
   counts json not null default '[]',
-  open_alerts json not null default '{}'
+  open_alerts json not null default '{}',
+  events json not null default '{}'
 );
 
 create index simulation_runs_started_by_idx on public.simulation_runs(started_by);

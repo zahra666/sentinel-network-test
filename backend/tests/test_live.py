@@ -79,6 +79,12 @@ def test_simulation_writes_through_normal_scan_and_scopes_clinicians():
         assert clinician_view["simulation"]["can_control"] is False
         org_patients = {p.reference for p in db.scalars(select(Patient).where(Patient.organization_id == clinician.organization_id))}
         assert all(alert["patient"]["reference"] in org_patients for alert in clinician_view["recent_alerts"])
+        assert admin_view["feed"] and admin_view["feed"][0]["step"] == 3
+        step = admin_view["feed"][0]
+        assert {stage["stage"] for stage in step["scan"]["stages"]} == {"sync", "analyse", "route"}
+        assert all(row["loinc"] in {"4548-4", "14749-6"} and "organization_id" not in row for row in step["observations"])
+        for item in clinician_view["feed"]:
+            assert all(row["patient"] in org_patients for row in item["observations"] + item["transitions"])
 
         stop_run(db, run, "test", admin)
         db.commit()

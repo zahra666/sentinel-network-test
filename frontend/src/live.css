@@ -54,3 +54,11 @@
 .live.alarm .live-kpi.coral strong{color:#c23a12}
 @keyframes alarm-glow{50%{box-shadow:0 0 0 4px rgba(212,96,59,.18)}}
 @media (prefers-reduced-motion:reduce){.live-kpi strong,.live-alarm{animation:none}}
+.live-stack{display:flex;flex-direction:column;gap:16px;min-width:0}
+.live-feed{display:flex;flex-direction:column}
+.live-code{margin:0;background:#0b1a22;color:#cfe3e6;border-radius:9px;padding:14px 16px;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow:auto;height:390px}
+.live-code-step{padding-bottom:10px;margin-bottom:10px;border-bottom:1px dashed #1f3a45}
+.live-code-step:last-child{border-bottom:0;margin-bottom:0}
+.live-code .c{color:#6f8c94}.live-code .k{color:#ff9e7a;font-weight:700}.live-code .s{color:#8fe3c5}.live-code .n{color:#ffd479}.live-code .f{color:#9ec8ff}
+.live-chart .end-label{font-size:11px;font-weight:700}
+.live.compact .live-grid{grid-template-columns:1fr}

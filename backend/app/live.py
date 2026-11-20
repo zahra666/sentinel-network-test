@@ -196,6 +196,7 @@ def simulation_tick(db: Session, run: SimulationRun) -> dict:
 
     latest = _latest_values(db)
     written = 0
+    records: list[dict] = []
     for patient in db.scalars(select(Patient).order_by(Patient.reference)).all():
         if rng.random() >= probability:
             continue
@@ -210,22 +211,48 @@ def simulation_tick(db: Session, run: SimulationRun) -> dict:
                 shift = surge_shift(run.ticks)
         hba1c = _next_value(values.get("hba1c_ngsp", profile["hba1c_base"]), _target(profile, "hba1c", elapsed_days) + shift[0], "hba1c", wave, rng)
         fpg = _next_value(values.get("fpg", profile["fpg_base"]), _target(profile, "fpg", elapsed_days) + shift[1], "fpg", wave * 1.6, rng)
-        db.add(_observation(patient, run, "hba1c", hba1c, "%", observed_at))
-        db.add(_observation(patient, run, "fpg", fpg, "mmol/L", observed_at))
+        for code, value, unit in (("hba1c", hba1c, "%"), ("fpg", fpg, "mmol/L")):
+            item = _observation(patient, run, code, value, unit, observed_at)
+            db.add(item)
+            records.append({
+                "organization_id": patient.organization_id, "patient": patient.reference, "care_setting": patient.care_setting,
+                "source_id": item.source_id, "loinc": item.standard_code, "code": code, "value": value, "unit": unit,
+                "observed_at": observed_at.date().isoformat(), "terminology_status": item.terminology_status,
+            })
         written += 2
     db.flush()
+    # Reload from the database so every timestamp compares consistently (SQLite returns naive UTC).
+    db.expire_all()
     run.observations_written += written
     run.last_tick_at = now_utc()
     scan = execute_scan(db, trigger=SIM_TRIGGER)
-    snapshot = capture_snapshot(db, run=run, scan=scan)
+    previous_statuses = dict(run.last_statuses or {})
+    snapshot, statuses = capture_snapshot(db, run=run, scan=scan)
+    latest_after = _latest_values(db)
+    transitions = [
+        {"organization_id": org, "patient": ref, "from": previous_statuses.get(pid), "to": status,
+         "hba1c": latest_after.get(pid, {}).get("hba1c_ngsp"), "fpg": latest_after.get(pid, {}).get("fpg")}
+        for pid, (org, ref, status) in sorted(statuses.items(), key=lambda kv: kv[1][1])
+        if previous_statuses.get(pid) and previous_statuses[pid] != status
+    ]
+    run.last_statuses = {pid: status for pid, (_, _, status) in statuses.items()}
+    snapshot.events = {
+        "step": run.ticks, "phase": phase["key"] if phase else None, "phase_label": phase["label"] if phase else None,
+        "simulated_from": previous.isoformat(), "simulated_to": as_utc(run.simulated_now).isoformat(),
+        "observations": records, "transitions": transitions,
+        "scan": {"id": scan.id, "stages": scan.events, "new_alerts": scan.finding_count},
+    }
     return {"tick": run.ticks, "phase": phase["key"] if phase else None, "observations_written": written, "new_alerts": scan.finding_count, "snapshot_id": snapshot.id, "simulated_now": as_utc(run.simulated_now).isoformat()}
 
 
-def capture_snapshot(db: Session, run: SimulationRun | None, scan: Scan | None) -> LiveStatusSnapshot:
+def capture_snapshot(db: Session, run: SimulationRun | None, scan: Scan | None) -> tuple[LiveStatusSnapshot, dict[str, tuple[str, str, str]]]:
+    """Store aggregate counts; return patient_id -> (organisation, reference, status) for transition reporting."""
     analyses, _ = analyse_patients(db)
     counter: Counter = Counter()
+    statuses: dict[str, tuple[str, str, str]] = {}
     for patient, result in analyses:
         counter[(patient.organization_id, patient.care_setting, result["status"])] += 1
+        statuses[patient.id] = (patient.organization_id, patient.reference, result["status"])
     open_alerts = dict(db.execute(
         select(Patient.organization_id, func.count(Alert.id)).join(Patient, Patient.id == Alert.patient_id)
         .where(Alert.status == "new").group_by(Patient.organization_id)
@@ -238,7 +265,7 @@ def capture_snapshot(db: Session, run: SimulationRun | None, scan: Scan | None) 
     )
     db.add(snapshot)
     db.flush()
-    return snapshot
+    return snapshot, statuses
 
 
 def start_run(db: Session, user: User, payload: StartPayload) -> SimulationRun:
@@ -257,7 +284,8 @@ def start_run(db: Session, user: User, payload: StartPayload) -> SimulationRun:
     db.add(run)
     db.flush()
     _scenario_cache[run.id] = payload.scenario
-    capture_snapshot(db, run=run, scan=None)
+    _, statuses = capture_snapshot(db, run=run, scan=None)
+    run.last_statuses = {pid: status for pid, (_, _, status) in statuses.items()}
     db.add(AuditEvent(actor_id=user.id, event_type="live.simulation_started", entity_type="simulation_run", entity_id=run.id,
                       detail={"synthetic_only": True, "tick_seconds": run.tick_seconds, "simulated_days_per_tick": run.simulated_days_per_tick, "scenario": payload.scenario}))
     return run
@@ -409,6 +437,21 @@ def build_dashboard(db: Session, user: User, points: int = 72) -> dict:
             "open_alerts": alerts.get(org_id, 0) if org_id else sum(alerts.values()),
         })
 
+    feed = []
+    for snap in reversed(snapshots[-6:]):
+        events = snap.events or {}
+        if not events:
+            continue
+        observations = [row for row in events.get("observations", []) if org_id is None or row["organization_id"] == org_id]
+        transitions = [row for row in events.get("transitions", []) if org_id is None or row["organization_id"] == org_id]
+        strip = lambda rows: [{k: v for k, v in row.items() if k != "organization_id"} for row in rows]
+        feed.append({
+            "step": events.get("step"), "simulated_from": events.get("simulated_from"), "simulated_to": events.get("simulated_to"),
+            "observations_total": len(observations), "observations": strip(observations[:4]),
+            "transitions_total": len(transitions), "transitions": strip(transitions[:5]),
+            "scan": events.get("scan", {}),
+        })
+
     current = _by_status(current_rows)
     return {
         "data_label": "Synthetic data — demonstration only",
@@ -420,6 +463,7 @@ def build_dashboard(db: Session, user: User, points: int = 72) -> dict:
         "series": series,
         "by_setting": [{"care_setting": name, "total": sum(values.values()), "by_status": values} for name, values in sorted(by_setting.items())],
         "recent_alerts": [serialize_alert(alert, db) for alert in recent],
+        "feed": feed,
         "integrity_note": "Simulated observations are outside the anchored source batch, so ledger verification reports a mismatch until the simulation is reset.",
     }
 
