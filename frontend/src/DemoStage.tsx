@@ -11,10 +11,14 @@ import "./demo.css";
 
 const API = import.meta.env.VITE_API_BASE_URL || "/api";
 type RecordValue = Record<string, any>;
-type Line = { id: string, kind: "obs" | "scan" | "phase" | "info" | "more", text?: string, obs?: RecordValue, at?: string, tone?: string };
+type Seg = [string, string?];  // text, syntax class
+type Line = { id: string, kind: "code" | "phase" | "info", segs?: Seg[], text?: string, tone?: string };
 
 const TICK_SECONDS = 3;
-const MAX_LINES = 220;
+const MAX_LINES = 260;
+const SAMPLE_ROWS = 4;        // INSERT rows shown per step; the rest are summarised
+const SAMPLE_ASSESSMENTS = 3; // review-state changes walked through per step
+const LOINC: Record<string, string> = { "4548-4": "HbA1c", "14749-6": "FPG" };
 const THRESHOLDS: Record<string, number> = { hba1c: 6.3, fpg: 7.0 };
 const PHASE_TONE: Record<string, string> = { baseline: "calm", surge: "hot", recovery: "warm", stable: "calm" };
 
@@ -29,49 +33,37 @@ const clock = (iso?: string) => (iso ? new Date(iso) : new Date()).toLocaleTimeS
 const simDate = (iso?: string | null) => iso ? new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
 
 export default function DemoStage({ token, onExit }: { token: string, onExit: () => void }) {
-  const [lines, setLines] = useState<Line[]>([{ id: "boot", kind: "info", text: "sentinel@ingest:~$ tail -f observations --source=live-simulation" }]);
+  const [lines, setLines] = useState<Line[]>([{ id: "boot", kind: "info", text: "sentinel@api:~$ tail -f live_simulation.sql  # statements each step runs" }]);
   const [sim, setSim] = useState<RecordValue | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [chrome, setChrome] = useState(true);
   const [rate, setRate] = useState(0);
   const [monitorKey, setMonitorKey] = useState(0);
-  const seen = useRef<Set<string>>(new Set());
   const queue = useRef<Line[]>([]);
-  const lastScan = useRef<string | null>(null);
+  const lastStep = useRef(0);
   const lastPhase = useRef<string | null>(null);
-  const lastWritten = useRef<number | null>(null);
   const primed = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
 
   const poll = useCallback(async () => {
     try {
-      const feed = await call("/live/feed?limit=120", token);
-      setSim(feed.simulation); setError("");
-      const fresh: Line[] = [];
-      const run = feed.simulation;
-      const observations: RecordValue[] = [...feed.observations].reverse(); // oldest first
-      const unseen = observations.filter((o) => !seen.current.has(o.id));
-      unseen.forEach((o) => seen.current.add(o.id));
+      const dashboard = await call("/live/dashboard?points=2", token);
+      const run = dashboard.simulation;
+      setSim(run); setError("");
+      const steps: RecordValue[] = [...(dashboard.feed || [])].reverse(); // oldest first
       if (!primed.current) { // do not replay history when the stage opens
-        primed.current = true; lastScan.current = feed.latest_scan?.id ?? null; lastPhase.current = run?.phase ?? null; lastWritten.current = run?.observations_written ?? 0;
+        primed.current = true; lastStep.current = steps.length ? steps[steps.length - 1].step : 0; lastPhase.current = run?.phase ?? null;
         return;
       }
-      if (run?.phase && run.phase !== lastPhase.current && run.status === "running") {
-        fresh.push({ id: `phase-${run.ticks}`, kind: "phase", text: `PHASE → ${run.phase_label}`, tone: PHASE_TONE[run.phase] });
+      const fresh: Line[] = [];
+      for (const step of steps.filter((item) => item.step > lastStep.current)) {
+        if (step.phase && step.phase !== lastPhase.current) fresh.push({ id: `phase-${step.step}`, kind: "phase", text: `PHASE → ${step.phase_label}`, tone: PHASE_TONE[step.phase] });
+        lastPhase.current = step.phase ?? lastPhase.current;
+        fresh.push(...stepLines(step, dashboard.statuses || []));
+        lastStep.current = step.step;
+        setRate(Math.round((step.observations_total || 0) / (run?.tick_seconds || TICK_SECONDS)));
       }
-      lastPhase.current = run?.phase ?? null;
-      const written = run?.observations_written ?? 0;
-      const delta = lastWritten.current === null ? 0 : Math.max(0, written - lastWritten.current);
-      lastWritten.current = written;
-      fresh.push(...unseen.map((obs) => ({ id: obs.id, kind: "obs" as const, obs })));
-      if (delta > unseen.length) fresh.push({ id: `more-${written}`, kind: "more", text: `… +${delta - unseen.length} more rows committed in this batch (${delta} total)` });
-      const scan = feed.latest_scan;
-      if (scan && scan.id !== lastScan.current) {
-        lastScan.current = scan.id;
-        fresh.push({ id: `scan-${scan.id}`, kind: "scan", text: `SCAN ${scan.id.slice(0, 6)} · Sync → Analyse → Route · ${scan.scanned_count} profiles evaluated · ${scan.finding_count} new review findings`, at: scan.started_at });
-      }
-      if (delta) setRate(Math.round(delta / (run?.tick_seconds || TICK_SECONDS)));
       queue.current.push(...fresh);
     } catch (err: any) { setError(err.message); }
   }, [token]);
@@ -104,10 +96,10 @@ export default function DemoStage({ token, onExit }: { token: string, onExit: ()
     try {
       setBusy(true); setError("");
       await call("/live/simulation/reset", token, "POST");
-      queue.current = []; seen.current = new Set(); primed.current = false; lastWritten.current = 0;
-      setLines([{ id: `boot-${Date.now()}`, kind: "info", text: "sentinel@ingest:~$ tail -f observations --source=live-simulation" }, { id: `start-${Date.now()}`, kind: "info", text: "connected · waiting for HL7/FHIR result batches…" }]);
+      queue.current = []; primed.current = false;
+      setLines([{ id: `boot-${Date.now()}`, kind: "info", text: "sentinel@api:~$ tail -f live_simulation.sql  # statements each step runs" }, { id: `start-${Date.now()}`, kind: "info", text: "-- connected · waiting for the first batch of synthetic lab results…" }]);
       await call("/live/simulation/start", token, "POST", { tick_seconds: TICK_SECONDS, scenario: "surge" });
-      primed.current = true; lastPhase.current = null; lastScan.current = null;
+      primed.current = true; lastPhase.current = null; lastStep.current = 0;
       setMonitorKey((k) => k + 1);
     } catch (err: any) { setError(err.message); }
     finally { setBusy(false); }
@@ -132,7 +124,7 @@ export default function DemoStage({ token, onExit }: { token: string, onExit: ()
     {error && <div className="error demo-error">{error}</div>}
     <div className="demo-split">
       <section className="demo-terminal" aria-label="Synthetic observation ingestion log">
-        <div className="demo-term-bar"><span className="dots"><i /><i /><i /></span><span>ingest · observations</span><span className="demo-rate">{running ? `${rate} rows/s` : "idle"}</span></div>
+        <div className="demo-term-bar"><span className="dots"><i /><i /><i /></span><span>live_simulation.sql · sentinel.db</span><span className="demo-rate">{running ? `${rate} rows/s` : "idle"}</span></div>
         <div className="demo-term-body" ref={scroller}>
           {lines.map((line) => <TermLine key={line.id} line={line} />)}
           <div className="demo-cursor">▍</div>
@@ -144,19 +136,38 @@ export default function DemoStage({ token, onExit }: { token: string, onExit: ()
   </div>;
 }
 
+function stepLines(step: RecordValue, statuses: RecordValue[]): Line[] {
+  const id = `s${step.step}`;
+  const out: Line[] = [];
+  const line = (n: string, ...segs: Seg[]) => out.push({ id: `${id}-${n}`, kind: "code", segs });
+  const label = (key: string) => statuses.find((s) => s.key === key)?.label || key;
+  line("h", [`-- step ${step.step} · simulated ${simDate(step.simulated_from)} → ${simDate(step.simulated_to)}`, "c"]);
+  line("b", ["BEGIN", "k"], [";"]);
+  line("i", ["INSERT INTO ", "k"], ["observations "], ["(patient, loinc, value, unit, observed_at, terminology_status)", "x"]);
+  (step.observations || []).slice(0, SAMPLE_ROWS).forEach((row: RecordValue, i: number) => {
+    const high = row.value >= (THRESHOLDS[row.code] ?? Infinity);
+    line(`r${i}`, [i ? "     , " : "VALUES ", i ? "x" : "k"], ["("], [`'${row.patient}'`, "s"], [", "], [`'${row.loinc}'`, "s"], [", "], [Number(row.value).toFixed(1), high ? "n hi" : "n"], [", "], [`'${row.unit}'`, "s"], [", "], [`'${row.observed_at}'`, "s"], [", "], [`'${row.terminology_status}'`, "s"], [")"], [`  -- ${LOINC[row.loinc] || row.code}`, "c"]);
+  });
+  const more = (step.observations_total || 0) - Math.min(SAMPLE_ROWS, (step.observations || []).length);
+  if (more > 0) line("m", [`     -- … ${more} more rows in this batch`, "c"]);
+  line("e", ["COMMIT", "k"], [";"], [`  -- ${step.observations_total} rows written`, "c"]);
+  const stages: RecordValue[] = step.scan?.stages || [];
+  const stage = (name: string) => stages.find((item) => item.stage === name) || {};
+  line("sc", [">>> ", "p"], ["scan", "v"], [" = "], ["execute_scan", "f"], ["(db, trigger="], ['"live_simulation"', "s"], [")"]);
+  line("so", ["    sync", "f"], ["(records="], [String(stage("sync").records_received ?? "?"), "n"], [") → "], ["analyse", "f"], ["(patients="], [String(stage("analyse").patients_evaluated ?? "?"), "n"], [") → "], ["route", "f"], ["(new_alerts="], [String(stage("route").new_alerts ?? 0), "n"], [")"]);
+  (step.transitions || []).slice(0, SAMPLE_ASSESSMENTS).forEach((row: RecordValue, i: number) => {
+    const check = (name: string, value: number | null | undefined, limit: number) => value === null || value === undefined ? [[` ${name} n/a`, "c"]] as Seg[] : [[` ${name} `], [Number(value).toFixed(1), value >= limit ? "n hi" : "n"], [value >= limit ? ` ≥ ${limit} ✓` : ` < ${limit}`, value >= limit ? "hi" : "c"]] as Seg[];
+    line(`a${i}`, [">>> ", "p"], ["assessment", "f"], ["("], [`"${row.patient}"`, "s"], [")"]);
+    line(`a${i}v`, ["   ", ""], ...check("hba1c", row.hba1c, THRESHOLDS.hba1c), ["  "], ...check("fpg", row.fpg, THRESHOLDS.fpg));
+    line(`a${i}t`, ["    "], [label(row.from), `st ${row.from}`], [" → "], [label(row.to), `st ${row.to}`]);
+  });
+  const others = (step.transitions_total || 0) - Math.min(SAMPLE_ASSESSMENTS, (step.transitions || []).length);
+  line("t", [step.transitions_total ? `-- ${step.transitions_total} profiles changed review state${others > 0 ? ` (${others} not shown)` : ""}` : "-- no review-state changes this step", "c"]);
+  line("z", [" "]);
+  return out;
+}
+
 function TermLine({ line }: { line: Line }) {
-  if (line.kind === "obs" && line.obs) {
-    const o = line.obs;
-    const high = (o.normalised_value ?? o.value) >= (THRESHOLDS[o.code] ?? Infinity);
-    return <div className="tl obs">
-      <span className="t">{clock(o.ingested_at)}</span>
-      <span className="k">INSERT</span>
-      <span className="p">{o.patient_reference}</span>
-      <span className="s">{String(o.care_setting).slice(0, 14)}</span>
-      <span className="c">{o.code === "hba1c" ? "HbA1c" : "FPG"}</span>
-      <span className={high ? "v high" : "v"}>{Number(o.value).toFixed(1)} {o.unit}</span>
-      <span className="l">LOINC {o.standard_code} {o.terminology_status === "verified" ? "✓" : "?"}</span>
-    </div>;
-  }
-  return <div className={`tl ${line.kind} ${line.tone || ""}`}>{line.at && <span className="t">{clock(line.at)}</span>}{line.text}</div>;
+  if (line.kind === "code") return <div className="tl code">{(line.segs || []).map(([text, cls], i) => <span key={i} className={cls}>{text}</span>)}</div>;
+  return <div className={`tl ${line.kind} ${line.tone || ""}`}>{line.text}</div>;
 }

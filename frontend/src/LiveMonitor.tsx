@@ -193,7 +193,7 @@ function TrendLines({ series, statuses }: { series: RecordValue[], statuses: Rec
   const x = (i: number) => L + (i / (series.length - 1)) * (W - L - R);
   const y = (v: number) => T + (1 - v / top) * (H - T - B);
   const grid = [0, top / 4, top / 2, (3 * top) / 4, top];
-  const ticks = [0, Math.floor((series.length - 1) / 2), series.length - 1];
+  const ticks = [...new Set([0, Math.floor((series.length - 1) / 2), series.length - 1])];
   return <svg className="live-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Share of review states over simulated time">
     {grid.map((v) => <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} className="grid" /><text x={L - 6} y={y(v) + 3} textAnchor="end">{Math.round(v)}%</text></g>)}
     {statuses.map((s) => <g key={s.key}>

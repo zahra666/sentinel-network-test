@@ -20,7 +20,7 @@
 .demo-rate{margin-left:auto;color:#4fe0bd;font-weight:700}
 .tone-hot .demo-rate{color:#ff8a65}
 .demo-term-body{flex:1;overflow:hidden;padding:10px 14px;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;display:flex;flex-direction:column;justify-content:flex-end}
-.tl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:tl-in .25s ease-out}
+.tl{flex-shrink:0;white-space:pre;overflow:hidden;text-overflow:ellipsis;animation:tl-in .25s ease-out}
 @keyframes tl-in{from{opacity:0;transform:translateX(-6px)}}
 .tl.obs{display:flex;gap:10px}
 .tl .t{color:#4d6a73;margin-right:2px}.tl .k{color:#5cb8ff}.tl .p{color:#e8f3f4;min-width:62px}.tl .s{color:#7f9aa2;min-width:104px}
@@ -29,8 +29,11 @@
 .tl.scan{color:#f1d27a;border-top:1px dashed #2a3f49;border-bottom:1px dashed #2a3f49;margin:4px 0;padding:2px 0;display:flex;gap:10px}
 .tl.phase{color:#0b1720;background:#4fe0bd;font-weight:800;letter-spacing:.05em;padding:3px 8px;margin:6px 0;border-radius:4px;text-transform:uppercase}
 .tl.phase.hot{background:#ff8a65}.tl.phase.warm{background:#f1bb4f}
-.demo-cursor{color:#4fe0bd;animation:live-blink 1s steps(1) infinite}
+.demo-cursor{flex-shrink:0;color:#4fe0bd;animation:live-blink 1s steps(1) infinite}
 .demo-term-foot{padding:8px 14px;font-size:10.5px;color:#4d6a73;border-top:1px solid #15262f}
 .demo-board{overflow:auto;padding:18px 22px;background:#f3f7f7;color:#15232e}
 .demo-board .live{gap:14px}
 @media (prefers-reduced-motion:reduce){.tl,.demo-phase.hot,.demo-cursor{animation:none}}
+.tl.code .k{color:#ff9e7a;font-weight:700}.tl.code .x{color:#9db3b9}.tl.code .s{color:#8fe3c5}.tl.code .n{color:#ffd479}.tl.code .n.hi,.tl.code .hi{color:#ff7a59;font-weight:700}
+.tl.code .c{color:#56737b}.tl.code .p{color:#4d6a73}.tl.code .f{color:#9ec8ff}.tl.code .v{color:#e8f3f4}
+.tl.code .st{font-weight:700}.tl.code .st.no_qualifying_evidence{color:#4fe0bd}.tl.code .st.confirmation_gap{color:#f1bb4f}.tl.code .st.evidence_requires_clinician_review{color:#ff8a65}.tl.code .st.data_quality_review{color:#9aa9ad}.tl.code .st.out_of_scope{color:#c7d3d4}
