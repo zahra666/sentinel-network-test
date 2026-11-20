@@ -320,3 +320,39 @@ class MdtReview(Base):
     clinician_attested_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     selected_pathways: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SimulationRun(Base):
+    """An administrator-started, accelerated-time synthetic data run for the live monitor."""
+
+    __tablename__ = "simulation_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    started_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    status: Mapped[str] = mapped_column(String(24), default="running", index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    tick_seconds: Mapped[int] = mapped_column(Integer, default=5)
+    simulated_days_per_tick: Mapped[int] = mapped_column(Integer, default=7)
+    simulated_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    simulated_now: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_tick_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ticks: Mapped[int] = mapped_column(Integer, default=0)
+    observations_written: Mapped[int] = mapped_column(Integer, default=0)
+    error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class LiveStatusSnapshot(Base):
+    """Aggregate review-state counts captured after each live-monitor scan; no patient identifiers."""
+
+    __tablename__ = "live_status_snapshots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("simulation_runs.id"), nullable=True, index=True)
+    scan_id: Mapped[str | None] = mapped_column(ForeignKey("scans.id"), nullable=True, index=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    simulated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # [{"organization_id", "care_setting", "status", "patients"}] plus per-organisation open alerts.
+    counts: Mapped[list] = mapped_column(JSON, default=list)
+    open_alerts: Mapped[dict] = mapped_column(JSON, default=dict)

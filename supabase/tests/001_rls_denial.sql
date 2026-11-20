@@ -7,7 +7,8 @@ declare
     'organizations', 'users', 'agent_access_keys', 'patients', 'observations', 'conditions', 'diagnostic_reports', 'scans', 'findings',
     'alerts', 'source_batches', 'research_grants', 'audit_events',
     'governance_reviews', 'notification_attempts', 'agent_conversations',
-    'agent_messages', 'delegated_tasks', 'mdt_reviews', 'mcp_demo_sessions'
+    'agent_messages', 'delegated_tasks', 'mdt_reviews', 'mcp_demo_sessions',
+    'simulation_runs', 'live_status_snapshots'
   ];
 begin
   foreach table_name in array tables loop

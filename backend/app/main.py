@@ -21,6 +21,7 @@ from .guideline_tree import assessment
 from .models import AgentMessage, Alert, AuditEvent, Condition, DelegatedTask, DiagnosticReport, Finding, GovernanceReview, McpDemoSession, MdtReview, NotificationAttempt, Observation, Organization, Patient, ResearchGrant, Scan, SourceBatch, User
 from .mdt import run_three_member_mdt
 from .mcp_access import router as mcp_access_router
+from .live import router as live_router, start_background_runner
 from .security import create_token, current_user, require_roles, verify_password
 from .services.analyse import analyse_patients
 from .services.route import mark_alert, route_findings
@@ -30,6 +31,7 @@ from .services.sync import sync_synthetic_records
 app = FastAPI(title="Sentinel Network", version="0.1.0", description="Synthetic data — demonstration only. Clinician review required.")
 app.add_middleware(CORSMiddleware, allow_origins=get_settings().origins, allow_credentials=False, allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type"])
 app.include_router(mcp_access_router)
+app.include_router(live_router)
 
 
 class FhirR4JsonResponse(JSONResponse):
@@ -79,6 +81,7 @@ def startup() -> None:
     if get_settings().seed_synthetic_data:
         from .seed import seed
         seed()
+    start_background_runner()
 
 
 @app.get("/health")

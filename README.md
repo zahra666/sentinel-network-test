@@ -48,6 +48,16 @@ outside this hackathon MVP:
 | Approved researcher | researcher.approved@sentinel.demo | 12345 |
 | Denied researcher | researcher.denied@sentinel.demo | 12345 |
 
+## Live Monitor (staff-only)
+
+**Live Monitor** is a single staff dashboard (administrators and clinicians; clinicians see only their own hospital). It shows the share of monitored synthetic T2DM profiles in each deterministic CPG review state over time, the mix by care setting, open review alerts, the newest alerts, and one selected patient's verified HbA1c/FPG trend. It refreshes every 3 seconds while a simulation runs and every 15 seconds otherwise.
+
+- Only an administrator can **Start**, **Stop**, **Advance one step** or **Reset** the simulation. Researchers and the CAIO account cannot open it.
+- Each step advances **accelerated simulated time** (default 7 simulated days every 5 real seconds), writes fictional HbA1c and FPG results through the verified terminology catalogue, then runs the normal Sync → Analyse → Route scan. Every displayed state therefore comes from the existing review tree; nothing is drawn from hard-coded numbers.
+- After each scan, an aggregate snapshot (counts by hospital, care setting and review state; no patient identifiers) is stored in `live_status_snapshots`.
+- Simulated observations are outside the anchored source batch, so Integrity Ledger verification reports a mismatch and the research aggregate fails closed while they exist. **Reset simulation** removes simulated observations and the scans, findings and alerts they produced (audit events are kept), restoring the original verification.
+- A run stops automatically after `LIVE_SIMULATION_MAX_MINUTES` (default 30). Set `LIVE_SIMULATION_ENABLED=false` to disable the background runner. Cloud schema: [live monitor migration](supabase/migrations/20261120130000_add_live_monitor.sql).
+
 ## AI governance lifecycle MVP
 
 Administrators and the dedicated **CAIO** demo account can open **AI Governance** to review Sentinel's evidence-backed lifecycle controls. CAIO browser access is restricted to governance and system status; it has no browser clinical or administrative controls. The page maps the local MVP to ISO/IEC 42001:2023 management-system themes and ISO/IEC 5338:2023 lifecycle practices. It is an alignment demonstrator only—not ISO certification or a full compliance claim.

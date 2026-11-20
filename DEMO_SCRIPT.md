@@ -9,5 +9,6 @@
 7. Open Integrity Ledger. Anchor a source batch, verify its mined commitment, then run the controlled tamper action. Verification must fail. Restore the source record and verify again; audit history remains.
 8. Revoke the approved research grant and confirm that the identical aggregate request is denied.
 9. Sign in as `caio@sentinel.demo` and open **AI Governance**. Start a five-minute MCP simulation and confirm it appears separately from observed agent activity. Issue a short-lived CAIO `status:read` MCP key as administrator, call `service_status` from an external MCP client, confirm observed activity increments, revoke the key, and confirm the next call is denied. The CAIO browser account must be refused from Patients and MCP key issuance.
+10. As administrator, open **Live Monitor**, start the simulation and watch the review-state mix, care-setting bars and open alerts update in simulated time. Sign in as the Aster clinician to confirm the same board is hospital-scoped and has no controls. Return as administrator and **Reset simulation**; confirm Integrity Ledger verification matches again.
 
 All displayed records, users, hospitals, and observations are synthetic fixtures.

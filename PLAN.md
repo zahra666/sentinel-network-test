@@ -14,5 +14,6 @@
 - [x] Deliver a bounded HL7 FHIR R4 interoperability vertical slice over the existing SQL model: authenticated patient-scoped import/export for Patient, Observation, Condition, and DiagnosticReport; no claim of full FHIR conformance.
 - [x] Add a verified diabetes-demo terminology catalogue (LOINC, UCUM, and a small SNOMED CT subset), original-code/value provenance, corrected-result reprocessing, code/unit-gated evidence rules, migrations, and access-control round-trip tests. Remote Supabase RLS execution remains pending.
 - [x] Surface readable coded observations in the clinical UI and document the supported FHIR subset, conversion limits, terminology licensing limits, and sample requests.
+- [x] Add a staff-only Live Monitor with an administrator-controlled accelerated-time synthetic simulation, aggregate review-state snapshots, Supabase migration and reset path. Remote Supabase migration execution remains pending.
 
 The application must never ingest real patient data, autonomously diagnose, prescribe, classify urgency, or submit referrals.

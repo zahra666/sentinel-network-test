@@ -1,6 +1,7 @@
 import React, { FormEvent, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import aurora from "./assets/sentinel-aurora-v2.png";
+import LiveMonitor from "./LiveMonitor";
 import "./styles.css";
 import "./fhir.css";
 import "./governance.css";
@@ -19,7 +20,7 @@ async function api(path: string, token?: string, options: RequestInit = {}) {
 }
 
 const nav = [
-  ["overview", "Overview", "◫"], ["patients", "Patients", "◎"], ["alerts", "Review Queue", "◉"], ["guideline", "Guideline Review", "⌘"], ["agent", "Sentinel Agent", "✦"], ["regional", "Regional Surveillance", "◌"], ["ledger", "Integrity Ledger", "⛓"], ["governance", "AI Governance", "◈"], ["status", "System Status", "◇"],
+  ["overview", "Overview", "◫"], ["live", "Live Monitor", "◔"], ["patients", "Patients", "◎"], ["alerts", "Review Queue", "◉"], ["guideline", "Guideline Review", "⌘"], ["agent", "Sentinel Agent", "✦"], ["regional", "Regional Surveillance", "◌"], ["ledger", "Integrity Ledger", "⛓"], ["governance", "AI Governance", "◈"], ["status", "System Status", "◇"],
 ];
 
 function App() {
@@ -67,6 +68,7 @@ function App() {
   });
   const content = {
     overview: <Overview data={overview} onRun={async () => { await api("/scans/run", token, { method: "POST" }); await refresh(); }} />,
+    live: <LiveMonitor token={token} />,
     patients: <Patients patients={patients} token={token} />,
     alerts: <Alerts alerts={alerts} token={token} refresh={refresh} />,
     guideline: <GuidelineReview patients={patients} token={token} />,

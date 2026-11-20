@@ -1,0 +1,48 @@
+.live{display:flex;flex-direction:column;gap:16px}
+.live-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#fff;border:1px solid #e4ebeb;border-radius:12px;padding:12px 16px}
+.live-bar-meta{display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:12px;color:#5f7277}
+.live-bar-meta b{color:#15232e}.live-bar-meta small{color:#8aa0a4;margin-left:4px}
+.live-pill{display:inline-flex;align-items:center;gap:7px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;padding:6px 9px;border-radius:6px;background:#eef2f2;color:#5f7277}
+.live-pill i{width:7px;height:7px;border-radius:50%;background:#a3b3b6}
+.live-pill.on{background:#e3f5ef;color:#087065}.live-pill.on i{background:#24b38f;animation:live-blink 1.4s ease-in-out infinite}
+@keyframes live-blink{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.live-pill.on i{animation:none}}
+.live-controls{display:flex;gap:8px;align-items:center}
+.live-controls button:disabled{opacity:.55;cursor:not-allowed}
+.live-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.live-kpi{background:#fff;border:1px solid #e4ebeb;border-radius:12px;padding:15px 17px}
+.live-kpi p{font-size:11px;color:#697e82;margin:0 0 6px}
+.live-kpi strong{font-size:26px;letter-spacing:-.04em;display:block}
+.live-kpi.coral strong{color:#c4532f}.live-kpi.amber strong{color:#b77812}
+.live-kpi small{font-size:11px;color:#769096;display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.live-kpi em{font-style:normal;font-weight:700}.live-kpi em.up{color:#c4532f}.live-kpi em.down{color:#087b6d}
+.live-grid{display:grid;grid-template-columns:1.45fr 1fr;gap:16px}
+.live-card{background:#fff;border:1px solid #e4ebeb;border-radius:12px;padding:16px 18px;min-width:0}
+.live-card header{margin-bottom:10px}.live-card h3{font-size:14px;margin:0}.live-card header p{margin:4px 0 0;color:#789096;font-size:11px}
+.live-card-split{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.live-card-split select{width:auto;max-width:240px;margin:0;font-size:12px;padding:7px 9px}
+.live-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:#5f7277;margin-bottom:8px}
+.live-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.live-chart{width:100%;height:auto;display:block}
+.live-chart text{font-size:10px;fill:#7b9094}
+.live-chart .grid{stroke:#edf2f2;stroke-width:1}
+.live-chart .threshold{stroke:#d4603b;stroke-width:1;stroke-dasharray:5 4}
+.live-chart .trend-line{fill:none;stroke:#087b6d;stroke-width:2}
+.live-chart .pt{fill:#fff;stroke:#087b6d;stroke-width:1.5}.live-chart .pt.high{stroke:#d4603b;fill:#fbe6dd}
+.live-settings{display:flex;flex-direction:column;gap:14px}
+.live-setting-head{display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px}
+.live-setting-head b{font-size:11px;color:#c4532f}
+.live-stackbar{display:flex;height:12px;border-radius:4px;overflow:hidden;background:#eef2f2}
+.live-stackbar i{display:block;height:100%;transition:width .6s ease}
+.live-setting small{font-size:10px;color:#8aa0a4}
+.live-patient-status{font-size:12px;color:#5f7277;margin-bottom:6px}
+.live-trend{margin-top:8px}.live-trend-head{display:flex;justify-content:space-between;font-size:12px;color:#5f7277}.live-trend-head b{color:#15232e}
+.live-trend-empty{font-size:12px;color:#80969a;padding:10px 0}
+.live-alerts{display:flex;flex-direction:column}
+.live-alert{display:flex;align-items:center;gap:10px;padding:10px 4px;border:0;border-bottom:1px solid #eff3f3;background:none;text-align:left;cursor:pointer;font:inherit;color:inherit}
+.live-alert:hover{background:#f4faf8}.live-alert:last-child{border-bottom:0}
+.live-alert>span:nth-child(2){flex:1}.live-alert b{font-size:12px;display:block}
+.live-alert small{font-size:11px;color:#688085}
+.live-dot{width:8px;height:8px;border-radius:50%;flex:none}
+.live-footnote{font-size:11px;color:#7b9094;line-height:1.5;margin:6px 0 0}
+@media(max-width:1050px){.live-kpis{grid-template-columns:repeat(2,1fr)}.live-grid{grid-template-columns:1fr}}
