@@ -428,3 +428,18 @@ class PatientMessage(Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delivery: Mapped[str] = mapped_column(String(32), default="simulated_outbox")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class CareEvent(Base):
+    """Synthetic annual-review history for the complication radar (eye and foot exams,
+    urine ACR, LDL cholesterol, blood pressure). Kept out of the source batch and FHIR export."""
+    __tablename__ = "care_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    patient_id: Mapped[str] = mapped_column(ForeignKey("patients.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)
+    performed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    value_secondary: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    result: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict)

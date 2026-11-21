@@ -12,9 +12,11 @@ from sqlalchemy.orm import Session
 
 from .cohort import cohort_profile
 from .chain import verify_batch
+from .guideline_tree import assessment
 from .care_gap import care_gaps_for_user
 from .outreach import draft_for_open_alerts, draft_message, find_reference
-from .models import AgentConversation, AgentMessage, AuditEvent, DelegatedTask, Observation, Patient, SourceBatch, User
+from .complications import build_radar
+from .models import AgentConversation, AgentMessage, Alert, CareEvent, AuditEvent, DelegatedTask, Finding, Observation, Organization, Patient, SourceBatch, User
 
 ALLOWED_CRAWL_HOSTS = {"moh.gov.my", "www.moh.gov.my", "mems.my", "www.mems.my"}
 ALLOWED_TASKS = {"evidence_reviewer", "regional_analyst", "integrity_verifier", "source_crawler"}
@@ -73,7 +75,9 @@ def chat(db: Session, user: User, content: str, conversation_id: str | None = No
         db.flush()
     db.add(AgentMessage(conversation_id=conversation.id, role="user", content=content, tool_events=[]))
     text = content.strip().lower()
+    words = set(re.findall(r"[a-z\u0600-\u06ff]+", text))
     events: list[dict] = []
+    reference = find_reference(content)
     if text.startswith("crawl "):
         task = enqueue_task(db, user, "source_crawler", {"url": content.strip()[6:].strip()})
         answer = "I queued an allowlisted public-source crawl. It will fetch reference material only; no clinical records leave Goola."
@@ -89,15 +93,108 @@ def chat(db: Session, user: User, content: str, conversation_id: str | None = No
         answer, events = _hypertension_count(db, user)
     elif _is_sglt2_review(text):
         answer, events = _sglt2_review(db, user)
+    elif reference:
+        answer = _patient_summary(db, user, reference)
+    elif words & GREETINGS and len(words) <= 4:
+        answer = "Hello. Ask me for today's review status, a patient summary such as ‘SYN-DM-442’, SGLT2 care gaps, or reminder drafts."
+    elif words & THANKS and len(words) <= 5:
+        answer = "You are welcome. Anything else you would like me to check?"
+    elif words & HELP_WORDS or "what can you" in text:
+        answer = CAPABILITIES
+    elif words & STATUS_WORDS or "how many" in text:
+        answer = _cohort_status(db, user)
     elif "patient" in text or "evidence" in text:
-        answer = "For an evidence review, open an authorised patient record and choose ‘Delegate evidence review’. I will enforce your organisation boundary and return only rule evidence and data-quality context."
+        answer = "For a patient summary, include the reference, for example ‘SYN-DM-442’. For a full evidence review, open the patient in Patients and choose ‘Delegate evidence review’. I enforce your organisation boundary and return only rule evidence and data-quality context."
     elif "regional" in text or "district" in text:
         answer = "Regional analysis is limited to authorised, fixed aggregate queries with denominator and small-cell controls. I can hand that to the aggregate-analysis subagent after grant verification."
     else:
-        answer = "I am Goola Agent. I can queue an authorised evidence review, integrity verification, fixed aggregate-analysis handoff, or an administrator-approved crawl of MOH/MEMS public guidance. I can list T2DM records with ASCVD or eGFR < 60 and no active SGLT2-inhibitor entry for clinician medication review (try: ‘list T2DM patients with ASCVD or eGFR <60 not yet on SGLT2-i’). I can also draft patient reminder emails (try: ‘email patients with open alerts’ or ‘remind SYN-DM-001’); a staff member must approve each one before it is sent. I can count records with a hypertension diagnosis (try: ‘how many patients have high blood pressure?’). I do not diagnose, prescribe, or access data outside your role."
+        db.flush()
+        previous = db.scalar(select(AgentMessage.content).where(AgentMessage.conversation_id == conversation.id, AgentMessage.role == "assistant").order_by(AgentMessage.created_at.desc()))
+        options = [option for option in FALLBACKS if option != previous]
+        answer = options[len(content) % len(options)]
     db.add(AgentMessage(conversation_id=conversation.id, role="assistant", content=answer, tool_events=events))
     db.add(AuditEvent(actor_id=user.id, event_type="agent.chat", entity_type="agent_conversation", entity_id=conversation.id, detail={"tool_events": events}))
     return {"conversation_id": conversation.id, "message": answer, "tool_events": events}
+
+
+GREETINGS = {"hi", "hello", "hey", "salam", "assalamualaikum", "morning", "afternoon", "evening", "مرحبا", "هلا", "السلام"}
+THANKS = {"thanks", "thank", "thx", "شكرا"}
+HELP_WORDS = {"help", "capabilities", "commands"}
+STATUS_WORDS = {"status", "summary", "overview", "today", "alerts", "queue", "cohort"}
+CAPABILITIES = ("I can: give today's review status (‘status’); summarise one patient (‘SYN-DM-442’); count records with a hypertension diagnosis (‘how many patients have high blood pressure?’); list T2DM records with ASCVD or eGFR < 60 "
+                "and no active SGLT2-inhibitor entry (‘SGLT2 care gaps’); draft reminder emails for staff approval (‘email patients with open alerts’); "
+                "and verify source integrity (‘verify integrity’). I do not diagnose, prescribe, or access data outside your role.")
+FALLBACKS = (
+    "I did not recognise that request. Try ‘status’, a patient reference such as ‘SYN-DM-442’, or ‘SGLT2 care gaps’.",
+    "I work from a fixed, audited set of tasks rather than free conversation. Type ‘help’ to see them.",
+    "That is outside what I can do. I can summarise a patient, report today's review status, draft reminders or verify integrity.",
+)
+TEST_NAMES = {"hba1c_ngsp": "HbA1c", "hba1c_ifcc": "HbA1c (IFCC)", "fpg": "fasting glucose", "rpg": "random glucose", "egfr_ckd_epi": "eGFR"}
+UNIT_NAMES = {"mL/min/{1.73_m2}": "mL/min/1.73m\u00b2"}
+STATUS_NAMES = {"evidence_requires_clinician_review": "clinician review required", "confirmation_gap": "confirmation gap",
+                "data_quality_review": "data-quality review", "no_qualifying_evidence": "no qualifying evidence", "out_of_scope_pregnancy": "out of scope (pregnancy)"}
+
+
+def _unit(code: str | None) -> str:
+    if not code:
+        return ""
+    return "%" if code == "%" else " " + UNIT_NAMES.get(code, code)
+
+
+def _staff_patients(user: User):
+    query = select(Patient)
+    if user.role == "clinician":
+        query = query.where(Patient.organization_id == user.organization_id)
+    return query
+
+
+def _cohort_status(db: Session, user: User) -> str:
+    if user.role not in {"administrator", "clinician"}:
+        return "Review status is available to administrators and clinicians. Researchers can request fixed regional aggregates instead."
+    patient_ids = list(db.scalars(_staff_patients(user).with_only_columns(Patient.id)).all())
+    if not patient_ids:
+        return "There are no patients in your authorised scope yet."
+    alerts = list(db.scalars(select(Alert).where(Alert.patient_id.in_(patient_ids))).all())
+    open_alerts = [alert for alert in alerts if alert.status == "new"]
+    counts: dict[str, int] = {}
+    for alert in open_alerts:
+        finding = db.get(Finding, alert.finding_id)
+        if finding:
+            counts[finding.status] = counts.get(finding.status, 0) + 1
+    scope = "your hospital" if user.role == "clinician" else "all three synthetic hospitals"
+    if not open_alerts:
+        return f"{len(patient_ids)} patients are monitored in {scope} and there are no open review alerts. Run a scan from Overview to evaluate the latest results."
+    detail = ", ".join(f"{count} {STATUS_NAMES.get(status, status.replace('_', ' '))}" for status, count in sorted(counts.items(), key=lambda item: -item[1]))
+    return (f"{len(patient_ids)} patients are monitored in {scope}. {len(open_alerts)} review alerts are open: {detail}. "
+            f"{sum(alert.status == 'acknowledged' for alert in alerts)} have been acknowledged. Open Review Queue to work through them.")
+
+
+def _patient_summary(db: Session, user: User, reference: str) -> str:
+    if user.role not in {"administrator", "clinician"}:
+        return "Patient-level summaries are available to administrators and clinicians only."
+    patient = db.scalar(_staff_patients(user).where(Patient.reference == reference))
+    if not patient:
+        return f"I cannot find {reference} in your authorised organisation."
+    organisation = db.get(Organization, patient.organization_id)
+    observations = db.scalars(select(Observation).where(Observation.patient_id == patient.id, Observation.clinical_key.in_(list(TEST_NAMES)),
+                                                        Observation.normalised_value.is_not(None)).order_by(Observation.observed_at.desc())).all()
+    latest: dict[str, Observation] = {}
+    for item in observations:
+        latest.setdefault(item.clinical_key, item)
+    results = "; ".join(f"{TEST_NAMES[key]} {latest[key].normalised_value:g}{_unit(latest[key].normalised_ucum_unit)}"
+                        + f" ({latest[key].observed_at:%d %b %Y})" for key in TEST_NAMES if key in latest)
+    observations_all = db.scalars(select(Observation).where(Observation.patient_id == patient.id).order_by(Observation.observed_at)).all()
+    status = assessment(patient, observations_all)["status"]
+    state = STATUS_NAMES.get(status, status.replace("_", " "))
+    finding = db.scalar(select(Finding).where(Finding.patient_id == patient.id).order_by(Finding.created_at.desc()))
+    alert = db.scalar(select(Alert).where(Alert.finding_id == finding.id)) if finding else None
+    alert_text = f" Review alert: {alert.status}." if alert else ""
+    where = f" ({organisation.name}, {patient.care_setting})" if organisation else ""
+    radar = build_radar(patient, list(db.scalars(select(CareEvent).where(CareEvent.patient_id == patient.id)).all()), list(observations_all))
+    flagged = [f"{domain['label'].lower()}: {domain['headline'][0].lower() + domain['headline'][1:]}" for domain in radar["domains"] if domain["status"] != "up_to_date"]
+    radar_text = f" Complication screening: {'; '.join(flagged)}." if flagged else " Complication screening is up to date."
+    return (f"{patient.reference}{where}. Latest results: {results or 'none recorded'}. Review state: {state}.{alert_text}{radar_text} "
+            "Open the patient in Patients for the full record. This is a summary for review, not a diagnosis.")
 
 
 def _is_hypertension_question(text: str) -> bool:

@@ -14,15 +14,17 @@ import LiveMonitor from "./LiveMonitor";
 import DemoStage from "./DemoStage";
 import OutreachPage, { PatientOutreach } from "./Outreach";
 import { RenalProfile } from "./RenalProfile";
+import ComplicationRadar, { CareGapSummary } from "./ComplicationRadar";
 import { CohortProfile, TherapyList, TreatmentChip, TreatmentSummary } from "./Treatment";
 import { Badge, Card, CountUp, Empty, Ring, Sparkline, STATUS_COLORS, Stat, human, toneFor } from "./ui";
 import "./styles.css";
 
 const API = import.meta.env.VITE_API_BASE_URL || "/api";
 type RecordValue = Record<string, any>;
-type PatientTab = "case" | "renal" | "therapy" | "outreach";
+type PatientTab = "case" | "complications" | "renal" | "therapy" | "outreach";
 const PATIENT_TABS: { id: PatientTab, label: string }[] = [
   { id: "case", label: "Patient" },
+  { id: "complications", label: "Complications" },
   { id: "renal", label: "Renal Profile" },
   { id: "therapy", label: "Glucose-Lowering Therapy" },
   { id: "outreach", label: "Outreach" },
@@ -149,7 +151,7 @@ function Login({ onLogin }: { onLogin: (data: RecordValue) => void }) {
       <div className="brand"><img className="brand-mark brand-logo" src={goolaIcon} alt="" /><div><b>Goola</b><span>Diabetes care intelligence</span></div></div>
       <div className="login-orbit" aria-hidden="true"><i /><i /><i /><b />{["HbA1c", "eGFR", "UACR", "Fundus exam", "Foot exam"].map((label, index) => <span key={label} className={`signal s${index}`}>{label}</span>)}</div>
       <div className="login-statement"><h2>Every result reviewed.<br /><em>Every complication caught early.</em></h2></div>
-      <span className="env-badge" title={SAFETY_NOTE}>Synthetic data — demonstration only</span>
+      <span className="env-badge" title={SAFETY_NOTE}>Synthetic data · demonstration only</span>
     </section>
     <section className="login-main"><form className="login-card" onSubmit={submit}>
       <h1>Sign in</h1>
@@ -193,6 +195,7 @@ function Overview({ data, token }: { data: RecordValue | null, token: string }) 
       <Stat label="Acknowledged" value={metrics.acknowledged_alerts ?? 0} icon={Check} />
       <Stat label="Source integrity" value={<Badge tone={toneFor(metrics.integrity)}>{human(metrics.integrity || "pending")}</Badge>} icon={Link2} />
     </section>
+    <CareGapSummary token={token} />
     <section className="grid-2">
       <Card title="Scan pipeline">
         <ol className="stepper">{pipeline.map((item, index) => <li key={item.stage} className={item.state === "completed" ? "done" : ""}>
@@ -260,6 +263,7 @@ function Patients({ patients, token }: { patients: RecordValue[], token: string 
           </div>
           <div id={`patients-panel-${activeTab}`} className="patient-tab-panel" role="tabpanel" aria-labelledby={`patients-tab-${activeTab}`} tabIndex={0}>
             {activeTab === "case" ? <PatientEvidence detail={detail} />
+              : activeTab === "complications" ? <ComplicationRadar patientId={detail.id} token={token} />
               : activeTab === "renal" ? renal ? <RenalProfile profile={renal} /> : <div className="renal-empty">No renal profile results for this record.</div>
               : activeTab === "outreach" ? <PatientOutreach patientId={detail.id} token={token} />
                 : <>
@@ -345,7 +349,7 @@ function GuidelineReview({ patients, token }: { patients: RecordValue[], token: 
 }
 
 const AGENT_PROMPTS = ["Email patients with open alerts", "Remind SYN-DM-001", "Verify integrity", "SGLT2 care gaps", "How many patients have high blood pressure?"];
-const SAFETY_NOTE = "Synthetic data — demonstration only. Supports clinician review; does not diagnose, prescribe, triage or submit referrals.";
+const SAFETY_NOTE = "Synthetic data · demonstration only. Supports clinician review; does not diagnose, prescribe, triage or submit referrals.";
 
 function CareGapTable({ item }: { item: RecordValue }) {
   const rows: RecordValue[] = item.records || [];
@@ -360,6 +364,8 @@ function CareGapTable({ item }: { item: RecordValue }) {
 function AgentConsole({ token }: { token: string }) {
   const [messages, setMessages] = useState<RecordValue[]>([{ role: "assistant", content: "Hello. I can run an evidence review, verify source integrity, prepare a regional analysis, draft patient reminders for your approval, or list T2DM records with ASCVD or eGFR < 60 and no SGLT2-inhibitor entry for clinician review." }]);
   const [text, setText] = useState(""); const [conversation, setConversation] = useState<string | undefined>(); const [busy, setBusy] = useState(false);
+  const thread = useRef<HTMLDivElement>(null);
+  useEffect(() => { thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: "smooth" }); }, [messages, busy]);
   const send = async (event?: FormEvent, preset?: string) => {
     event?.preventDefault(); const outgoing = (preset ?? text).trim(); if (!outgoing) return;
     setText(""); setMessages((items) => [...items, { role: "user", content: outgoing }]); setBusy(true);
@@ -375,7 +381,7 @@ function AgentConsole({ token }: { token: string }) {
       <div className="prompt-list"><h4>Suggested</h4>{AGENT_PROMPTS.map((prompt) => <button key={prompt} className="prompt" disabled={busy} onClick={() => send(undefined, prompt)}>{prompt}</button>)}</div>
     </Card>
     <Card className="chat" flush>
-      <div className="messages">{messages.map((message, index) => <div key={index} className={`message ${message.role}`}>
+      <div className="messages" ref={thread}>{messages.map((message, index) => <div key={index} className={`message ${message.role}`}>
         {message.role !== "user" && <img src={goolaIcon} alt="" className="message-avatar" />}
         <div className="bubble"><p>{message.content}</p>{message.tool_events?.length ? <span className="task-chip"><Check size={12} />{message.tool_events.every((item: RecordValue) => item.type === "cohort_count") ? "Counted from records" : `Task queued: ${message.tool_events.map((item: RecordValue) => human(item.type)).join(", ")}`}</span> : null}{message.tool_events?.filter((item: RecordValue) => item.type === "sglt2_care_gap").map((item: RecordValue, eventIndex: number) => <CareGapTable key={eventIndex} item={item} />)}</div>
       </div>)}{busy && <div className="message assistant"><img src={goolaIcon} alt="" className="message-avatar" /><div className="bubble typing"><i /><i /><i /></div></div>}</div>

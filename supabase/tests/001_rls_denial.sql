@@ -9,7 +9,7 @@ declare
     'governance_reviews', 'notification_attempts', 'agent_conversations',
     'agent_messages', 'delegated_tasks', 'mdt_reviews', 'mcp_demo_sessions',
     'simulation_runs', 'live_status_snapshots', 'patient_contact_consents', 'patient_messages',
-    'medication_statements'
+    'medication_statements', 'care_events'
   ];
 begin
   foreach table_name in array tables loop

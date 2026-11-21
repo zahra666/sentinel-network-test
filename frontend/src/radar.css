@@ -1,0 +1,94 @@
+/* Complication radar */
+.radar-card { overflow: hidden; }
+.radar-grid { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 22px; align-items: center; }
+.body-map { width: 100%; height: auto; overflow: visible; }
+.silhouette path, .silhouette circle { fill: var(--surface-3); stroke: var(--border-strong); stroke-width: 1.2; }
+.spot { cursor: pointer; }
+.spot-core { stroke: var(--bg); stroke-width: 2; transition: r .2s; }
+.spot-ring { fill: none; stroke-width: 1.5; opacity: .55; transform-box: fill-box; transform-origin: center; }
+.spot.up_to_date .spot-core { fill: var(--success); } .spot.up_to_date .spot-ring { stroke: var(--success); opacity: .25; }
+.spot.overdue .spot-core { fill: var(--warning); } .spot.overdue .spot-ring { stroke: var(--warning); }
+.spot.not_recorded .spot-core { fill: var(--muted); } .spot.not_recorded .spot-ring { stroke: var(--muted); }
+.spot.needs_review .spot-core { fill: var(--red); filter: drop-shadow(0 0 6px var(--red)); }
+.spot.needs_review .spot-ring { stroke: var(--red); animation: spot-pulse 1.8s ease-out infinite; }
+.spot.active .spot-core { r: 8; }
+@keyframes spot-pulse { 0% { transform: scale(.6); opacity: .9; } 100% { transform: scale(1.8); opacity: 0; } }
+
+.organ-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.organ { position: relative; border: 1px solid var(--border); background: var(--surface-2); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 8px; transition: border-color .2s, box-shadow .2s, transform .2s; }
+.organ.active { transform: translateY(-1px); border-color: var(--border-strong); }
+.organ.needs_review { border-color: var(--red-line); box-shadow: inset 0 0 0 1px rgba(255, 59, 31, .08), 0 14px 40px -24px rgba(255, 59, 31, .8); }
+.organ.overdue { border-color: var(--warning-line); }
+.organ header { display: grid; grid-template-columns: 32px 1fr; align-items: center; gap: 4px 10px; }
+.organ header .badge { grid-column: 1 / -1; justify-self: start; margin-top: 6px; }
+.organ header b { display: block; font-size: 14px; font-weight: 600; }
+.organ header small { display: block; font-size: 12px; color: var(--muted); }
+.organ-icon { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: var(--surface-3); border: 1px solid var(--border-strong); color: var(--text-2); }
+.organ.needs_review .organ-icon { color: var(--red); border-color: var(--red-line); background: var(--red-soft); }
+.organ.overdue .organ-icon { color: var(--warning); border-color: var(--warning-line); background: var(--warning-bg); }
+.organ.up_to_date .organ-icon { color: var(--success); }
+.organ-headline { font-family: var(--serif); font-size: 21px; line-height: 1.15; color: var(--text); }
+.organ.needs_review .organ-headline { color: #ffd6cf; }
+.organ dl { margin: 0; display: flex; gap: 16px; flex-wrap: wrap; }
+.organ dl div { display: flex; flex-direction: column; }
+.organ dt { font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.organ dd { margin: 0; font-family: var(--mono); font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+.organ dd small { font-size: 11px; color: var(--muted); }
+.organ footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.organ footer .small { padding: 5px 12px; font-size: 12px; }
+.staged { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-weight: 600; }
+.staged-note { font-size: 12px; color: var(--muted); }
+
+.kidney-trend { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--border); }
+.trend-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
+.trend-head h4 { font-family: var(--serif); font-size: 26px; font-weight: 400; margin-top: 2px; }
+.trend-stats { display: flex; gap: 22px; }
+.trend-stats span { display: flex; flex-direction: column; align-items: flex-end; }
+.trend-stats small { font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.trend-stats b { font-family: var(--serif); font-size: 30px; font-weight: 400; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.trend-stats b.down { color: var(--red); text-shadow: 0 0 22px rgba(255, 59, 31, .35); }
+.trend-chart { width: 100%; height: auto; display: block; overflow: visible; }
+.trend-chart text { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
+.trend-chart .grid { stroke: #22222c; }
+.trend-chart .threshold { stroke: var(--red); stroke-dasharray: 4 5; opacity: .7; }
+.trend-chart .threshold-label { fill: var(--red); }
+.trend-chart .history { fill: none; stroke: var(--text); stroke-width: 2.2; stroke-linejoin: round; }
+.trend-chart .projection { fill: none; stroke: var(--red); stroke-width: 2.2; stroke-dasharray: 6 6; filter: drop-shadow(0 0 6px rgba(255, 59, 31, .55)); }
+.trend-chart .dot { fill: var(--surface); stroke: var(--text); stroke-width: 1.8; }
+.trend-chart .dot.latest { fill: var(--text); }
+.trend-chart .cross-line { stroke: var(--red); stroke-width: 1; opacity: .4; }
+.trend-chart .cross-dot { fill: var(--red); filter: drop-shadow(0 0 8px var(--red)); }
+
+/* Cohort care gaps */
+.gap-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.gap { border: 1px solid var(--border); background: var(--surface-2); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 4px; }
+.gap header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.gap header b { font-size: 14px; font-weight: 600; }
+.gap strong { font-family: var(--serif); font-size: 46px; font-weight: 400; line-height: 1; }
+.gap > small { font-size: 12px; color: var(--muted); }
+.gap-bar { display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: var(--surface-3); margin: 12px 0 8px; }
+.gap-bar i { display: block; height: 100%; transition: width 1s cubic-bezier(.2, .8, .2, 1); }
+.gap-bar .needs_review, .gap-legend .needs_review::before { background: var(--red); }
+.gap-bar .overdue, .gap-legend .overdue::before { background: var(--warning); }
+.gap-bar .not_recorded, .gap-legend .not_recorded::before { background: var(--muted); }
+.gap-bar .up_to_date { background: rgba(74, 222, 128, .55); }
+.gap-legend { display: flex; gap: 12px; flex-wrap: wrap; font-family: var(--mono); font-size: 11px; color: var(--text-2); }
+.gap-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.gap-legend span::before { content: ""; width: 7px; height: 7px; border-radius: 50%; }
+
+@media (max-width: 1280px) { .gap-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .radar-grid { grid-template-columns: 1fr; } .body-map { max-width: 180px; margin: 0 auto; } .organ-grid { grid-template-columns: 1fr; } }
+.organ footer .small { white-space: normal; text-align: left; max-width: 100%; }
+
+/* Inside the patient workspace tab the radar adapts to the panel width */
+.patient-tab-panel { container-type: inline-size; }
+@container (max-width: 760px) {
+  .radar-grid { grid-template-columns: 1fr; }
+  .body-map { display: none; }
+  .organ-headline { font-size: 19px; }
+  .trend-head { flex-direction: column; align-items: flex-start; }
+  .trend-stats span { align-items: flex-start; }
+}
+@container (max-width: 420px) {
+  .organ-grid { grid-template-columns: 1fr; }
+}

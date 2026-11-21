@@ -2,7 +2,7 @@
 
 Sentinel Network is a local-first, synthetic-data-only hackathon MVP for transparent EMR anomaly surveillance, clinician review, privacy-bounded research aggregates, and blockchain-backed integrity checks.
 
-> **Synthetic data — demonstration only.** This is not a diagnostic, prescribing, triage, referral, or production EMR system. Clinical decisions remain with a qualified clinician.
+> **Synthetic data · demonstration only.** This is not a diagnostic, prescribing, triage, referral, or production EMR system. Clinical decisions remain with a qualified clinician.
 
 ## Architecture
 
@@ -155,6 +155,20 @@ Every seeded patient has a renal profile at three visits (about 12 months, 6 mon
 - **Schema**: new nullable `patients.sex` (`female`/`male`), migration `20261121170000_add_patient_sex.sql`; the local SQLite demo adds the column automatically. FHIR `Patient.gender` is exported when sex is recorded.
 - **API**: `GET /api/patients/{id}/renal-profile` (administrator: all; clinician: own organisation; researcher/CAIO: no access). Returns series, sex-specific reference interval, H/L flag and the KDIGO G category of the latest eGFR. Corrected versions supersede earlier ones without double-plotting.
 - **Limits**: H/L flags are display aids, not diagnosis, triage or urgency. A single eGFR category is not a CKD diagnosis (needs ≥3 months and albuminuria/UACR, not modelled). Age groups keep the original equal-thirds design (NDR patients are older). `supabase/seed_synthetic.sql` does not include these data; use the backend seed. After switching to this branch, delete `backend/sentinel.db` before starting.
+
+## Complication Radar (staff-only)
+
+The Patients page has a **Complications** tab for the four classic diabetes complications: **Kidneys**, **Eyes**, **Feet and nerves** and **Heart**. Each shows its last screening date, latest values and one of four states: *Needs review*, *Overdue* (no screening in 12 months), *Not recorded* or *Up to date*. The Overview shows the same open gaps across the cohort.
+
+- **Kidney trajectory.** A least-squares line over the CKD-EPI eGFR results already in the record (the renal profile panels and the current result, effective source versions only) is projected forward. A crossing of eGFR 60 is reported only inside a 24-month window, so the radar always matches the Renal Profile tab. Example: SYN-DM-442, eGFR 61.9 falling about 1.8 a year, reaches 60 in about 13 months.
+- **Stage, never send.** "Stage" buttons only write a `care_gap.order_staged` audit event with `submitted: false` for clinician sign-off. Nothing is ordered, referred or sent, and no diagnosis or urgency is assigned.
+- **Consistent synthetic history.** Eye and foot exams, urine ACR, LDL and blood pressure live in a separate `care_events` table seeded deterministically on start (existing databases are backfilled). Blood pressure follows the recorded hypertension diagnosis and urine ACR follows the latest eGFR. These rows are not part of the source batch, FHIR export, integrity ledger or detection rules. Thresholds (eGFR 60, urine ACR 30 mg/g, LDL 2.6 mmol/L, systolic 140 mmHg) are illustrative demo values.
+- Access matches other clinical routes: administrators see all patients, clinicians only their own hospital, researchers and CAIO are denied.
+- Cloud schema: [care events migration](supabase/migrations/20261121180000_add_care_events.sql).
+
+## Goola Agent conversation
+
+Goola Agent answers from a fixed, audited set of tasks: `status` (open review alerts in your scope), a patient reference such as `SYN-DM-442` (latest results, review state and complication screening), hypertension counts, SGLT2 care gaps, reminder drafts and integrity checks. Unrecognised messages get a short varied reply that points to `help`, instead of repeating the same paragraph. Patient summaries respect the organisation boundary and are never shown to researchers.
 
 ## Healthcare interoperability — focused FHIR R4 MVP
 

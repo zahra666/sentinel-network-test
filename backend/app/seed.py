@@ -9,6 +9,7 @@ from .config import get_settings
 from .db import SessionLocal, initialise_database
 from .models import AuditEvent, Condition, MedicationStatement, Observation, Organization, Patient, ResearchGrant, SourceBatch, User
 from .security import hash_password, verify_password
+from .complications import seed_care_history
 from .cohort import CohortMember, assign_sex, plan_egfr, plan_hypertension
 from .renal_profile import seed_codes, synthetic_renal_panels
 from .treatment import Profile, Regimen, plan_treatment
@@ -165,6 +166,8 @@ def seed() -> None:
                     admin = db.scalar(select(User).where(User.role == "administrator"))
                     db.add(AuditEvent(actor_id=admin.id if admin else None, event_type="seed.source_batch_completed", entity_type="source_batch", entity_id=batch.id, detail={"observations": len(observations), "synthetic_only": True}))
                     changes_pending = True
+            if seed_care_history(db, ANCHOR):
+                changes_pending = True
             if updated_accounts:
                 admin = db.scalar(select(User).where(User.role == "administrator"))
                 db.add(AuditEvent(
@@ -307,6 +310,7 @@ def seed() -> None:
         db.add(batch)
         db.flush()
         db.add(AuditEvent(actor_id=users[0].id, event_type="seed.completed", entity_type="source_batch", entity_id=batch.id, detail={"patients": len(patients), "observations": len(observations), "conditions": len(conditions), "medication_statements": len(medications), "care_mix": {setting: sum(row["care_setting"] == setting for row in attributes) for setting in ("Outpatient Clinic", "Medical Ward", "Surgical Ward", "O&G Ward")}, "sex": {sex: sum(value == sex for value in sex_plan.values()) for sex in ("female", "male")}, "egfr_not_tested": sum(value is None for value in egfr_plan.values()), "hypertension": len(hypertensive)}))
+        seed_care_history(db, ANCHOR)
         db.commit()
 
 

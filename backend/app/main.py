@@ -15,6 +15,7 @@ from .treatment import cohort_summary, modality_of
 from .cohort import cohort_profile
 from .renal_profile import renal_profile
 from .care_gap import care_gaps_for_user
+from .complications import router as complications_router
 from .agent import chat, enqueue_task, process_pending_tasks, process_task
 from .chain import ChainUnavailable, anchor_batch, anchor_research_grant, revoke_research_grant, verify_batch, verify_research_grant
 from .config import get_settings
@@ -33,11 +34,12 @@ from .services.route import mark_alert, route_findings
 from .services.sentinel_agent import advance_notification_workflows
 from .services.sync import sync_synthetic_records
 
-app = FastAPI(title="Goola", version="0.1.0", description="Synthetic data — demonstration only. Clinician review required.")
+app = FastAPI(title="Goola", version="0.1.0", description="Synthetic data · demonstration only. Clinician review required.")
 app.add_middleware(CORSMiddleware, allow_origins=get_settings().origins, allow_credentials=False, allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type"])
 app.include_router(mcp_access_router)
 app.include_router(live_router)
 app.include_router(outreach_router)
+app.include_router(complications_router)
 
 
 class FhirR4JsonResponse(JSONResponse):
@@ -92,7 +94,7 @@ def startup() -> None:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "data_label": "Synthetic data — demonstration only"}
+    return {"status": "ok", "data_label": "Synthetic data · demonstration only"}
 
 
 @app.post("/api/auth/login")
@@ -121,7 +123,7 @@ def overview(user: User = Depends(require_roles("administrator", "clinician")), 
     latest_scan = db.scalar(select(Scan).order_by(Scan.started_at.desc()))
     batch = db.scalar(select(SourceBatch).order_by(SourceBatch.created_at.desc()))
     pipeline = latest_scan.events if latest_scan else [{"stage": "sync", "state": "not_run"}, {"stage": "analyse", "state": "not_run"}, {"stage": "route", "state": "not_run"}]
-    return {"data_label": "Synthetic data — demonstration only", "metrics": {"monitored_profiles": len(patients), "open_review_alerts": sum(item.status == "new" for item in alerts), "acknowledged_alerts": sum(item.status == "acknowledged" for item in alerts), "integrity": batch.receipt_status if batch else "not_seeded"}, "pipeline": pipeline, "latest_scan": serialize_scan(latest_scan) if latest_scan else None, "recent_alerts": [serialize_alert(item, db) for item in sorted(alerts, key=lambda item: item.id, reverse=True)[:6]]}
+    return {"data_label": "Synthetic data · demonstration only", "metrics": {"monitored_profiles": len(patients), "open_review_alerts": sum(item.status == "new" for item in alerts), "acknowledged_alerts": sum(item.status == "acknowledged" for item in alerts), "integrity": batch.receipt_status if batch else "not_seeded"}, "pipeline": pipeline, "latest_scan": serialize_scan(latest_scan) if latest_scan else None, "recent_alerts": [serialize_alert(item, db) for item in sorted(alerts, key=lambda item: item.id, reverse=True)[:6]]}
 
 
 @app.post("/api/scans/run")
@@ -313,7 +315,7 @@ def update_alert(alert_id: str, payload: AlertAction, user: User = Depends(requi
 @app.get("/api/notifications")
 def notifications(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
     query = select(NotificationAttempt).where(NotificationAttempt.recipient_user_id == user.id).order_by(NotificationAttempt.created_at.desc())
-    return [{"id": item.id, "state": item.state, "created_at": item.created_at.isoformat(), "finding_id": item.finding_id, "data_label": "Synthetic data — demonstration only"} for item in db.scalars(query).all()]
+    return [{"id": item.id, "state": item.state, "created_at": item.created_at.isoformat(), "finding_id": item.finding_id, "data_label": "Synthetic data · demonstration only"} for item in db.scalars(query).all()]
 
 
 @app.get("/api/research/regional")
@@ -542,7 +544,7 @@ def sentinel_tick(user: User = Depends(require_roles("administrator")), db: Sess
 def system_status(_user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     scan = db.scalar(select(Scan).order_by(Scan.finished_at.desc()))
     batch = db.scalar(select(SourceBatch).order_by(SourceBatch.created_at.desc()))
-    return {"data_label": "Synthetic data — demonstration only", "api": "healthy", "scheduler": {"timezone": get_settings().schedule_timezone, "enabled": get_settings().schedule_enabled, "mode": get_settings().scheduler_mode, "last_scan": serialize_scan(scan) if scan else None}, "sentinel_agent": "in_app_notifications_and_review_queue_only", "chain": batch.receipt_status if batch else "unavailable", "summary_mode": "deterministic templates"}
+    return {"data_label": "Synthetic data · demonstration only", "api": "healthy", "scheduler": {"timezone": get_settings().schedule_timezone, "enabled": get_settings().schedule_enabled, "mode": get_settings().scheduler_mode, "last_scan": serialize_scan(scan) if scan else None}, "sentinel_agent": "in_app_notifications_and_review_queue_only", "chain": batch.receipt_status if batch else "unavailable", "summary_mode": "deterministic templates"}
 
 
 @app.get("/api/governance")
@@ -602,7 +604,7 @@ def serialize_user(user: User) -> dict:
 
 def serialize_patient(patient: Patient, db: Session) -> dict:
     organization = db.get(Organization, patient.organization_id)
-    return {"id": patient.id, "reference": patient.reference, "care_setting": patient.care_setting, "age_group": patient.age_group, "sex": patient.sex, "organization": organization.name if organization else None, "district": organization.district if organization else None, "pregnancy_related": patient.pregnancy_related, "body_mass_index": patient.body_mass_index, "documented_complexity": patient.documented_complexity, "data_label": "Synthetic data — demonstration only"}
+    return {"id": patient.id, "reference": patient.reference, "care_setting": patient.care_setting, "age_group": patient.age_group, "sex": patient.sex, "organization": organization.name if organization else None, "district": organization.district if organization else None, "pregnancy_related": patient.pregnancy_related, "body_mass_index": patient.body_mass_index, "documented_complexity": patient.documented_complexity, "data_label": "Synthetic data · demonstration only"}
 
 
 def serialize_observation(item: Observation) -> dict:
