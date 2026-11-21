@@ -10,6 +10,7 @@ from .db import SessionLocal, initialise_database
 from .models import AuditEvent, Condition, MedicationStatement, Observation, Organization, Patient, ResearchGrant, SourceBatch, User
 from .security import hash_password, verify_password
 from .renal_profile import seed_codes, synthetic_renal_panels, synthetic_sex_is_female
+from .treatment import Profile, Regimen, plan_treatment
 from .terminology import ATC_MEDICATIONS, ATC_SYSTEM, LOINC_SYSTEM, LOINC_VERSION, SNOMED_CONDITIONS, SNOMED_SYSTEM, TerminologyError, map_measurement
 
 PASSWORD = "12345"
@@ -59,13 +60,26 @@ def synthetic_ascvd_code(index: int) -> str | None:
     return ("22298006", "230690007", "399957001")[(index // 5) % 3]
 
 
-def synthetic_medications(index: int, patient_id: str, egfr: float | None, has_ascvd: bool) -> list[MedicationStatement]:
+def synthetic_on_sglt2(index: int, egfr: float | None, has_ascvd: bool) -> bool:
+    """Deterministic active SGLT2-inhibitor flag (unchanged from the care-gap seed)."""
+    if index % 100 in {35, 65}:
+        return False
+    eligible = has_ascvd or (egfr is not None and 20 <= egfr < 60)
+    return (eligible and (index * 7) % 10 < 4) or (not eligible and index % 13 == 0)
+
+
+def synthetic_medications(index: int, patient_id: str, egfr: float | None, has_ascvd: bool, regimen: Regimen | None = None) -> list[MedicationStatement]:
     """Deterministic current-medication list. Includes deliberate review fixtures:
-    a stopped SGLT2 inhibitor (index %100 == 35) and an unmapped local code (index %100 == 65)."""
+    a stopped SGLT2 inhibitor (index %100 == 35) and an unmapped local code (index %100 == 65).
+
+    With a `regimen` (from treatment.plan_treatment) the glucose-lowering list
+    follows the NDR-calibrated modality: oral agents, injected insulin, both, or
+    diet only. SGLT2 inhibitor status is identical either way.
+    """
     items: list[MedicationStatement] = []
     started = ANCHOR - timedelta(days=200)
 
-    def add(suffix: str, atc: str | None, status: str = "active", local: str | None = None) -> None:
+    def add(suffix: str, atc: str | None, status: str = "active", local: str | None = None, extra: dict | None = None) -> None:
         entry = ATC_MEDICATIONS.get(atc) if atc else None
         items.append(MedicationStatement(
             patient_id=patient_id, source_id=f"MED-{index:03d}-{suffix}", version=1, status=status,
@@ -74,10 +88,14 @@ def synthetic_medications(index: int, patient_id: str, egfr: float | None, has_a
             atc_code=atc if entry else None, atc_display=entry["display"] if entry else None,
             terminology_status="verified" if entry else "needs_terminology_review",
             effective_from=started, recorded_at=ANCHOR,
-            provenance={"source": "deterministic synthetic seed", "synthetic_only": True},
+            provenance={"source": "deterministic synthetic seed", "synthetic_only": True, **(extra or {})},
         ))
 
-    if egfr is None or egfr >= 30:
+    if regimen is None:
+        metformin = egfr is None or egfr >= 30
+    else:
+        metformin = regimen.metformin
+    if metformin:
         add("METF", "A10BA02")
     if index % 100 == 35:
         add("SGLT2", "A10BK01", status="stopped")
@@ -85,9 +103,14 @@ def synthetic_medications(index: int, patient_id: str, egfr: float | None, has_a
     if index % 100 == 65:
         add("LOCAL", None, local="LOCAL-FORMULARY-0417")
         return items
-    eligible = has_ascvd or (egfr is not None and 20 <= egfr < 60)
-    if (eligible and (index * 7) % 10 < 4) or (not eligible and index % 13 == 0):
+    if synthetic_on_sglt2(index, egfr, has_ascvd):
         add("SGLT2", "A10BK01" if index % 2 else "A10BK03")
+    if regimen is not None:
+        calibration = {"calibration": "NDR Report 2023 Table 10", "modality": regimen.modality}
+        if regimen.gliclazide:
+            add("SU", "A10BB09", extra={**calibration, **({"note": "; ".join(regimen.notes)} if regimen.notes else {})})
+        if regimen.insulin_atc:
+            add("INS", regimen.insulin_atc, extra=calibration)
     return items
 
 
@@ -156,6 +179,14 @@ def seed() -> None:
                 db.add(patient)
         db.flush()
 
+        profiles = []
+        for index, patient in enumerate(patients, start=1):
+            egfr_value, ascvd = synthetic_egfr(index), synthetic_ascvd_code(index) is not None
+            profiles.append(Profile(index=index, egfr=egfr_value, has_ascvd=ascvd, on_sglt2=synthetic_on_sglt2(index, egfr_value, ascvd),
+                                    abnormal_glycaemia=index % 11 == 0 or index % 100 in {1, 17, 45}, age_group=patient.age_group,
+                                    care_setting=patient.care_setting, pregnancy_related=patient.pregnancy_related))
+        treatment_plan = plan_treatment(profiles)
+
         conditions: list[Condition] = []
         medications: list[MedicationStatement] = []
         observations: list[Observation] = []
@@ -191,7 +222,7 @@ def seed() -> None:
                     terminology_status="verified", recorded_at=ANCHOR - timedelta(days=400),
                     provenance={"source": "deterministic synthetic seed", "synthetic_only": True, "multimorbidity": "ascvd"},
                 ))
-            medications.extend(synthetic_medications(index, patient.id, egfr, ascvd_code is not None))
+            medications.extend(synthetic_medications(index, patient.id, egfr, ascvd_code is not None, treatment_plan[index]))
             for sequence, (code, value, item_unit, days_ago) in enumerate(values, start=1):
                 loinc_code, local_code = {
                     "hba1c": ("4548-4", "HBA1C"),

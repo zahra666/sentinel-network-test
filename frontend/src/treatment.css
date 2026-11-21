@@ -1,0 +1,30 @@
+.tx-chip { display: inline-flex; align-items: center; gap: 4px; font: 500 12px var(--sans); color: var(--text-2); padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface-2); white-space: nowrap; vertical-align: middle; }
+.tx-chip small { display: inline !important; margin: 0 0 0 2px !important; font: 600 10px var(--mono); color: var(--muted); }
+.tx-chip.tx-oral_only { color: #7cb4ff; border-color: rgba(124, 180, 255, .3); background: rgba(124, 180, 255, .08); }
+.tx-chip.tx-insulin_plus_oral { color: #ff9a80; border-color: rgba(255, 122, 89, .32); background: rgba(255, 122, 89, .08); }
+.tx-chip.tx-insulin_only { color: #ff6b57; border-color: rgba(255, 59, 31, .35); background: rgba(255, 59, 31, .1); }
+.tx-chip.tx-diet_only { color: #4ade80; border-color: rgba(74, 222, 128, .28); background: rgba(74, 222, 128, .08); }
+.tx-chip.tx-medication_list_needs_review { color: var(--warning); border-color: var(--warning-line); background: var(--warning-bg); }
+.card-section h4 .tx-chip { margin-left: 8px; text-transform: none; letter-spacing: 0; }
+.tx-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.tx-list li { display: grid; grid-template-columns: 16px 1fr auto auto; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; }
+.tx-list li svg { color: var(--muted); }
+.tx-list small { color: var(--muted); font-size: 11px; }
+.tx-list code { font-size: 11px; color: var(--subtle); }
+.tx-summary { padding: 14px 16px 16px; display: grid; gap: 12px; }
+.tx-bar { display: flex; height: 12px; border-radius: 999px; overflow: hidden; background: var(--surface-3); }
+.tx-bar i { display: block; height: 100%; }
+.tx-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; vertical-align: middle; }
+.tx-table th, .tx-table td { padding: 8px 10px; }
+.tx-table tr.tx-sub td { color: var(--muted); font-size: 12px; padding-top: 5px; padding-bottom: 5px; }
+.tx-table tr.tx-sub td:first-child { padding-left: 26px; }
+.tx-foot { margin: 0; color: var(--subtle); font-size: 11px; line-height: 1.5; }
+.tx-foot a { color: var(--muted); }
+.patients-page { display: grid; gap: 20px; }
+.table.with-treatment th, .table.with-treatment td { padding-left: 8px; padding-right: 8px; }
+.table.with-treatment th:first-child, .table.with-treatment td:first-child { padding-left: 16px; }
+.table.with-treatment th:last-child, .table.with-treatment td:last-child { padding-right: 10px; }
+.table.with-treatment td:nth-child(2) { white-space: normal; min-width: 76px; font-size: 13px; }
+.table.with-treatment td:nth-child(3) { padding-left: 4px; }
+.table.with-treatment .tx-chip { font-size: 11px; padding: 2px 6px; }
+.table.with-treatment .tx-chip svg { display: none; }

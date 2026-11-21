@@ -11,6 +11,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .treatment import cohort_summary, modality_of
 from .renal_profile import renal_profile
 from .care_gap import care_gaps_for_user
 from .agent import chat, enqueue_task, process_pending_tasks, process_task
@@ -20,7 +21,7 @@ from .db import get_db, initialise_database
 from .fhir_r4 import FhirValidationError, condition_resource, everything_bundle, import_bundle, observation_resource, patient_resource, report_resource
 from .governance import build_governance_dashboard, review_snapshot
 from .guideline_tree import assessment
-from .models import AgentMessage, Alert, AuditEvent, Condition, DelegatedTask, DiagnosticReport, Finding, GovernanceReview, McpDemoSession, MdtReview, NotificationAttempt, Observation, Organization, Patient, ResearchGrant, Scan, SourceBatch, User
+from .models import AgentMessage, MedicationStatement, Alert, AuditEvent, Condition, DelegatedTask, DiagnosticReport, Finding, GovernanceReview, McpDemoSession, MdtReview, NotificationAttempt, Observation, Organization, Patient, ResearchGrant, Scan, SourceBatch, User
 from .mdt import run_three_member_mdt
 from .mcp_access import router as mcp_access_router
 from .live import router as live_router, start_background_runner
@@ -176,7 +177,31 @@ def patients(user: User = Depends(require_roles("administrator", "clinician")), 
     query = select(Patient).order_by(Patient.reference)
     if user.role == "clinician":
         query = query.where(Patient.organization_id == user.organization_id)
-    return [serialize_patient(patient, db) for patient in db.scalars(query).all()]
+    rows = list(db.scalars(query).all())
+    therapy = _treatment_by_patient(db, [patient.id for patient in rows])
+    return [{**serialize_patient(patient, db), "treatment": _treatment_brief(therapy[patient.id])} for patient in rows]
+
+
+def _treatment_by_patient(db: Session, patient_ids: list[str]) -> dict[str, dict]:
+    grouped: dict[str, list] = {pid: [] for pid in patient_ids}
+    if patient_ids:
+        for item in db.scalars(select(MedicationStatement).where(MedicationStatement.patient_id.in_(patient_ids))).all():
+            grouped[item.patient_id].append(item)
+    return {pid: modality_of(items) for pid, items in grouped.items()}
+
+
+def _treatment_brief(result: dict) -> dict:
+    return {"modality": result["modality"], "label": result["label"], "insulin": result["insulin"], "oral_agent_count": result["oral_agent_count"]}
+
+
+@app.get("/api/treatment/summary")
+def treatment_summary(user: User = Depends(require_roles("administrator", "clinician")), db: Session = Depends(get_db)) -> dict:
+    """Cohort glucose-lowering modality mix next to NDR 2023 (clinicians: own hospital only)."""
+    query = select(Patient.id)
+    if user.role == "clinician":
+        query = query.where(Patient.organization_id == user.organization_id)
+    ids = list(db.scalars(query).all())
+    return {"scope": "organisation" if user.role == "clinician" else "all_organisations", **cohort_summary(list(_treatment_by_patient(db, ids).values()))}
 
 
 @app.get("/api/patients/{patient_id}")
@@ -187,7 +212,8 @@ def patient_detail(patient_id: str, user: User = Depends(require_roles("administ
     reports = list(db.scalars(select(DiagnosticReport).where(DiagnosticReport.patient_id == patient.id).order_by(DiagnosticReport.effective_at)).all())
     return {**serialize_patient(patient, db), "observations": [serialize_observation(item) for item in observations],
             "conditions": [serialize_condition(item) for item in conditions], "diagnostic_reports": [serialize_diagnostic_report(item) for item in reports],
-            "guideline_assessment": assessment(patient, observations)}
+            "guideline_assessment": assessment(patient, observations),
+            "treatment": modality_of(db.scalars(select(MedicationStatement).where(MedicationStatement.patient_id == patient.id)).all())}
 
 
 @app.get("/api/patients/{patient_id}/renal-profile")

@@ -117,6 +117,23 @@ Access: `GET /api/care-gaps/sglt2?limit=1..50` for administrators (all hospitals
 
 Synthetic multimorbidity: about 1 in 5 profiles carry an ASCVD condition, about 1 in 6 have a CKD-EPI eGFR of 32–58, one per 100 has eGFR 17, and roughly 40% of eligible profiles have an active SGLT2 inhibitor. Fixtures include a stopped SGLT2-inhibitor entry (`SYN-DM-035`) and an unmapped local medication code (`SYN-DM-065`). **An existing local database must be deleted (`backend/sentinel.db`) and reseeded to receive these records**; cloud deployments must apply `supabase/migrations/20261121130000_add_medication_statements.sql` and seed through the backend (`SEED_SYNTHETIC_DATA=true`). `supabase/seed_synthetic.sql` does not include medications or ASCVD conditions.
 
+## Glucose-lowering treatment modality (NDR 2023-calibrated)
+
+Every seeded patient has a glucose-lowering regimen: oral glucose-lowering drugs (OGLD) only, injected insulin plus OGLD, injected insulin only, or diet/lifestyle only. ("Oral" means tablets such as metformin or gliclazide; insulin itself is injected.) The mix is calibrated to the **Malaysian National Diabetes Registry Report 2023, Table 10** (MOH public health clinics, audit dataset N = 113,903, p.37):
+
+| Measure | NDR 2023 | Seeded cohort (500) |
+|---|---|---|
+| OGLD only (monotherapy 32.07 % + ≥2 OAD 35.24 %) | 67.31 % | 66.2 % (+1 % unmapped-code fixtures shown as "needs review") |
+| OGLD + insulin | 22.60 % | 22.6 % |
+| Insulin only (derived: any insulin 27.12 % − OAD + insulin 22.60 %) | 4.52 % | 4.6 % |
+| Diet only | 5.58 % | 5.6 % |
+| Metformin / sulphonylurea | 85.57 % / 42.40 % | 85.6 % / 42.4 % |
+
+- **How**: `backend/app/treatment.py` assigns exact largest-remainder counts. Insulin goes preferentially to patients with poorer glycaemic evidence, lower eGFR, ASCVD, age 65+, medical-ward care or pregnancy-related records. Metformin is never given below eGFR 30. SGLT2-inhibitor status and the stopped/unmapped fixtures are unchanged, so the SGLT2 care-gap results are identical.
+- **Drugs (WHO ATC, verified 2026-11-21 against the WHOCC index updated 2026-01-20)**: `A10BB09` gliclazide (oral); `A10AC01` intermediate-acting human insulin (basal, added to OGLD); `A10AD01` premixed human insulin (insulin-only). Human insulins are an assumption typical of MOH clinics; the NDR does not report insulin type.
+- **API/UI**: `GET /api/patients` adds a `treatment` field (Treatment column in Patients); `GET /api/patients/{id}` adds the active list with route; `GET /api/treatment/summary` gives cohort vs NDR (administrator: all; clinician: own hospital).
+- **Limits**: the NDR covers public primary care; hospital and specialist cohorts use more insulin. The NDR does not report DPP-4 or SGLT2 inhibitor use. This is a synthetic demonstration, not a prescribing model.
+
 ## Synthetic renal profile (U&E panel)
 
 Each seeded patient gets a renal profile at three visits (about 12 months, 6 months and 8 days before the anchor date): sodium, potassium, chloride, creatinine, urea, uric acid and eGFR — the same seven analytes as a Malaysian hospital "Renal Profile" report.

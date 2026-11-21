@@ -154,10 +154,18 @@ T2DM_SNOMED_CODE = "44054006"
 ATC_SYSTEM = "http://www.whocc.no/atc"
 ATC_INDEX_DATE = "2024-12-27"
 ATC_MEDICATIONS: dict[str, dict[str, str]] = {
-    "A10BA02": {"display": "metformin", "class": "biguanide"},
-    "A10BK01": {"display": "dapagliflozin", "class": "sglt2_inhibitor"},
-    "A10BK03": {"display": "empagliflozin", "class": "sglt2_inhibitor"},
+    "A10BA02": {"display": "metformin", "class": "biguanide", "route": "oral"},
+    "A10BK01": {"display": "dapagliflozin", "class": "sglt2_inhibitor", "route": "oral"},
+    "A10BK03": {"display": "empagliflozin", "class": "sglt2_inhibitor", "route": "oral"},
+    # Verified 2026-11-21 against the WHOCC ATC/DDD Index (atcddd.fhi.no, last
+    # updated 2026-01-20): A10BB09 gliclazide (oral); A10AC01 insulin (human),
+    # intermediate-acting, and A10AD01 insulin (human), intermediate combined
+    # with fast-acting (premixed) -- both injection (Adm.R "P", parenteral).
+    "A10BB09": {"display": "gliclazide", "class": "sulfonylurea", "route": "oral"},
+    "A10AC01": {"display": "insulin (human), intermediate-acting", "class": "insulin", "route": "injection"},
+    "A10AD01": {"display": "insulin (human), premixed intermediate + fast-acting", "class": "insulin", "route": "injection"},
 }
+ATC_NEW_ENTRIES_INDEX_DATE = "2026-01-20"
 SGLT2_ATC_GROUP = "A10BK"
 
 

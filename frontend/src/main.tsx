@@ -14,6 +14,7 @@ import LiveMonitor from "./LiveMonitor";
 import DemoStage from "./DemoStage";
 import OutreachPage, { PatientOutreach } from "./Outreach";
 import { RenalProfile } from "./RenalProfile";
+import { TherapyList, TreatmentChip, TreatmentSummary } from "./Treatment";
 import { Badge, Card, CountUp, Empty, Ring, Sparkline, STATUS_COLORS, Stat, human, toneFor } from "./ui";
 import "./styles.css";
 
@@ -205,6 +206,8 @@ function Overview({ data, token }: { data: RecordValue | null, token: string }) 
 function Patients({ patients, token }: { patients: RecordValue[], token: string }) {
   const [selected, setSelected] = useState<RecordValue | null>(null); const [detail, setDetail] = useState<RecordValue | null>(null); const [query, setQuery] = useState("");
   const [renal, setRenal] = useState<RecordValue | null>(null);
+  const [therapy, setTherapy] = useState<RecordValue | null>(null);
+  useEffect(() => { api("/treatment/summary", token).then(setTherapy).catch(() => setTherapy(null)); }, [token, patients.length]);
   const choose = async (patient: RecordValue) => {
     setSelected(patient); setDetail(null); setRenal(null);
     const [record, profile] = await Promise.all([api(`/patients/${patient.id}`, token), api(`/patients/${patient.id}/renal-profile`, token).catch(() => null)]);
@@ -213,9 +216,9 @@ function Patients({ patients, token }: { patients: RecordValue[], token: string 
   const shown = useMemo(() => { const q = query.trim().toLowerCase(); return q ? patients.filter((p) => `${p.reference} ${p.care_setting} ${p.organization}`.toLowerCase().includes(q)) : patients; }, [patients, query]);
   return <section className="master-detail">
     <Card title="Patients" count={patients.length} flush actions={<label className="search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" aria-label="Search patients" /></label>}>
-      <div className="table-scroll"><table className="table selectable"><thead><tr><th>Patient</th><th>Care setting</th><th>Age</th><th>Scope</th></tr></thead><tbody>
+      <div className="table-scroll"><table className="table selectable with-treatment"><thead><tr><th>Patient</th><th>Care setting</th><th>Age</th><th>Treatment</th><th>Scope</th></tr></thead><tbody>
         {shown.map((patient) => <tr key={patient.id} className={selected?.id === patient.id ? "selected" : ""} onClick={() => choose(patient)}>
-          <td><b>{patient.reference}</b><small>{patient.organization}</small></td><td>{patient.care_setting}</td><td className="num">{patient.age_group}</td>
+          <td><b>{patient.reference}</b><small>{patient.organization}</small></td><td>{patient.care_setting}</td><td className="num">{patient.age_group}</td><td><TreatmentChip treatment={patient.treatment} /></td>
           <td><Badge tone={patient.pregnancy_related ? "warning" : "neutral"}>{patient.pregnancy_related ? "Scope check" : "In scope"}</Badge></td></tr>)}
       </tbody></table></div>
     </Card>
@@ -223,6 +226,7 @@ function Patients({ patients, token }: { patients: RecordValue[], token: string 
       {selected ? detail ? <PatientEvidence detail={detail} /> : <Card title={selected.reference}><div className="loading-line" /></Card> : <Card title="Patient record"><Empty title="Select a patient" text="Choose a profile to view results and review status." /></Card>}
       {detail && renal && <Card title="Renal profile" subtitle="Na · K · Cl · Creatinine · Urea · Uric acid · eGFR" flush><RenalProfile profile={renal} /></Card>}
       {detail && <Card title="Outreach"><PatientOutreach patientId={detail.id} token={token} /></Card>}
+      {therapy && <Card title="Glucose-lowering therapy" subtitle={`${therapy.patients} synthetic patients · calibrated to Malaysia NDR 2023`} flush><TreatmentSummary summary={therapy} /></Card>}
     </div>
   </section>;
 }
@@ -241,6 +245,7 @@ function PatientEvidence({ detail }: { detail: RecordValue }) {
         <td>{observation.terminology_status !== "verified" ? <Badge tone="warning">{human(observation.terminology_status)}</Badge> : <code>{observation.coding?.code || observation.original_code || observation.code}</code>}</td>
       </tr>)}
     </tbody></table>
+    <TherapyList treatment={detail.treatment} />
     {detail.conditions?.length ? <div className="card-section"><h4>Conditions</h4>{detail.conditions.map((condition: RecordValue) => <p key={condition.id} className="kv"><span>{condition.snomed?.display || condition.source_coding?.display || "Unmapped condition"}</span><code>{condition.snomed?.code || condition.source_coding?.code}</code></p>)}</div> : null}
     {detail.guideline_assessment.considerations?.[0] && <div className="card-section"><h4>Guideline consideration</h4><p className="body-text">{detail.guideline_assessment.considerations[0]}</p></div>}
   </Card>;
