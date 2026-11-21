@@ -7,9 +7,9 @@ from sqlalchemy import select
 from .chain import build_source_batch
 from .config import get_settings
 from .db import SessionLocal, initialise_database
-from .models import AuditEvent, Condition, Observation, Organization, Patient, ResearchGrant, SourceBatch, User
+from .models import AuditEvent, Condition, MedicationStatement, Observation, Organization, Patient, ResearchGrant, SourceBatch, User
 from .security import hash_password, verify_password
-from .terminology import LOINC_SYSTEM, LOINC_VERSION, SNOMED_SYSTEM, TerminologyError, map_measurement
+from .terminology import ATC_MEDICATIONS, ATC_SYSTEM, LOINC_SYSTEM, LOINC_VERSION, SNOMED_CONDITIONS, SNOMED_SYSTEM, TerminologyError, map_measurement
 
 PASSWORD = "12345"
 DEMO_EMAILS = (
@@ -38,6 +38,56 @@ def care_matrix_for(total: int) -> list[tuple[int, str, int]]:
     for index in sorted(range(len(exact)), key=lambda i: exact[i] - counts[i], reverse=True)[: total - sum(counts)]:
         counts[index] += 1
     return [(org, setting, count) for (org, setting, _), count in zip(BASE_CARE_MATRIX, counts)]
+
+
+def synthetic_egfr(index: int) -> float | None:
+    """Deterministic CKD-EPI eGFR spread: mostly preserved, ~1 in 6 below 60, one below 20 per 100."""
+    if index % 100 == 9:
+        return None  # deliberate missing-eGFR fixture
+    if index % 100 == 49:
+        return 17.0  # below the guideline SGLT2-inhibitor initiation threshold
+    if index % 6 == 0:
+        return float(32 + (index * 7) % 27)  # 32-58: CKD G3a/G3b range
+    return 72.0 - (index % 9)
+
+
+def synthetic_ascvd_code(index: int) -> str | None:
+    """About 1 in 5 profiles carry an ASCVD condition alongside T2DM (multimorbidity)."""
+    if index % 5 != 0:
+        return None
+    return ("22298006", "230690007", "399957001")[(index // 5) % 3]
+
+
+def synthetic_medications(index: int, patient_id: str, egfr: float | None, has_ascvd: bool) -> list[MedicationStatement]:
+    """Deterministic current-medication list. Includes deliberate review fixtures:
+    a stopped SGLT2 inhibitor (index %100 == 35) and an unmapped local code (index %100 == 65)."""
+    items: list[MedicationStatement] = []
+    started = ANCHOR - timedelta(days=200)
+
+    def add(suffix: str, atc: str | None, status: str = "active", local: str | None = None) -> None:
+        entry = ATC_MEDICATIONS.get(atc) if atc else None
+        items.append(MedicationStatement(
+            patient_id=patient_id, source_id=f"MED-{index:03d}-{suffix}", version=1, status=status,
+            source_coding_system=ATC_SYSTEM if atc else "urn:sentinel:local-formulary",
+            source_code=atc or local, source_display=entry["display"] if entry else "Local formulary item (unmapped)",
+            atc_code=atc if entry else None, atc_display=entry["display"] if entry else None,
+            terminology_status="verified" if entry else "needs_terminology_review",
+            effective_from=started, recorded_at=ANCHOR,
+            provenance={"source": "deterministic synthetic seed", "synthetic_only": True},
+        ))
+
+    if egfr is None or egfr >= 30:
+        add("METF", "A10BA02")
+    if index % 100 == 35:
+        add("SGLT2", "A10BK01", status="stopped")
+        return items
+    if index % 100 == 65:
+        add("LOCAL", None, local="LOCAL-FORMULARY-0417")
+        return items
+    eligible = has_ascvd or (egfr is not None and 20 <= egfr < 60)
+    if (eligible and (index * 7) % 10 < 4) or (not eligible and index % 13 == 0):
+        add("SGLT2", "A10BK01" if index % 2 else "A10BK03")
+    return items
 
 
 def seed() -> None:
@@ -106,6 +156,7 @@ def seed() -> None:
         db.flush()
 
         conditions: list[Condition] = []
+        medications: list[MedicationStatement] = []
         observations: list[Observation] = []
         for index, patient in enumerate(patients, start=1):
             abnormal = index % 11 == 0 or index % 100 in {1, 17, 45}
@@ -113,8 +164,9 @@ def seed() -> None:
             fpg_early, fpg_late = (6.1, 7.6) if abnormal else (5.4, 5.8)
             unit = "mg/dL" if index % 100 == 7 else "mmol/L"
             values = [("hba1c", hba1c_early, "%", 50), ("fpg", fpg_early, unit, 48), ("hba1c", hba1c_late, "%", 12), ("fpg", fpg_late, unit, 10)]
-            if index % 100 != 9:
-                values.append(("egfr", 72.0 - (index % 9), "mL/min/{1.73_m2}", 8))
+            egfr = synthetic_egfr(index)
+            if egfr is not None:
+                values.append(("egfr", egfr, "mL/min/{1.73_m2}", 8))
             conditions.append(Condition(
                 patient_id=patient.id, source_id=f"COND-{index:03d}", version=1,
                 clinical_status="active", verification_status="confirmed",
@@ -124,6 +176,17 @@ def seed() -> None:
                 terminology_status="verified", recorded_at=ANCHOR,
                 provenance={"source": "deterministic synthetic seed", "synthetic_only": True},
             ))
+            if (ascvd_code := synthetic_ascvd_code(index)):
+                conditions.append(Condition(
+                    patient_id=patient.id, source_id=f"COND-{index:03d}-ASCVD", version=1,
+                    clinical_status="active", verification_status="confirmed",
+                    source_coding_system=SNOMED_SYSTEM, source_code=ascvd_code,
+                    source_display=SNOMED_CONDITIONS[ascvd_code]["display"],
+                    snomed_code=ascvd_code, snomed_display=SNOMED_CONDITIONS[ascvd_code]["display"],
+                    terminology_status="verified", recorded_at=ANCHOR - timedelta(days=400),
+                    provenance={"source": "deterministic synthetic seed", "synthetic_only": True, "multimorbidity": "ascvd"},
+                ))
+            medications.extend(synthetic_medications(index, patient.id, egfr, ascvd_code is not None))
             for sequence, (code, value, item_unit, days_ago) in enumerate(values, start=1):
                 loinc_code, local_code = {
                     "hba1c": ("4548-4", "HBA1C"),
@@ -158,12 +221,13 @@ def seed() -> None:
                     **{key: mapping[key] for key in ("original_code", "coding_system", "standard_code", "coding_display", "terminology_version", "clinical_key", "terminology_status", "normalised_value", "normalised_ucum_unit")},
                 ))
         db.add_all(conditions)
+        db.add_all(medications)
         db.add_all(observations)
         db.flush()
         batch = build_source_batch(observations)
         db.add(batch)
         db.flush()
-        db.add(AuditEvent(actor_id=users[0].id, event_type="seed.completed", entity_type="source_batch", entity_id=batch.id, detail={"patients": len(patients), "observations": len(observations), "care_mix": {setting: sum(c for _, name, c in care_matrix if name == setting) for setting in ("Outpatient Clinic", "Medical Ward", "Surgical Ward", "O&G Ward")}}))
+        db.add(AuditEvent(actor_id=users[0].id, event_type="seed.completed", entity_type="source_batch", entity_id=batch.id, detail={"patients": len(patients), "observations": len(observations), "conditions": len(conditions), "medication_statements": len(medications), "care_mix": {setting: sum(c for _, name, c in care_matrix if name == setting) for setting in ("Outpatient Clinic", "Medical Ward", "Surgical Ward", "O&G Ward")}}))
         db.commit()
 
 

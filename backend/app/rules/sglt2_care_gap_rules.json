@@ -1,0 +1,17 @@
+{
+  "version": "sglt2-care-gap-demo-v1",
+  "purpose": "Medication-list review: identify synthetic T2DM records that meet a guideline organ-protection criterion and have no active, verified SGLT2-inhibitor entry. Output is a clinician review list, not a prescription or recommendation for an individual.",
+  "disclaimer": "Illustrative demo rule on synthetic data; clinician validation required. It does not diagnose, prescribe, triage, or contact patients.",
+  "criteria": {
+    "ascvd": "Active, confirmed condition with a verified SNOMED CT code in the ASCVD demo subset.",
+    "ckd_egfr_below": 60,
+    "initiation_egfr_minimum": 20,
+    "egfr_method": "CKD-EPI creatinine-based eGFR (LOINC 62238-1) only; other or unspecified equations are not compared.",
+    "sglt2_atc_group": "A10BK"
+  },
+  "references": {
+    "ada_2026": "ADA Standards of Care in Diabetes 2026 (Diabetes Care 49, Suppl. 1): SGLT2 inhibitor for T2D with ASCVD; for T2D with CKD, initiate when eGFR is at least 20 mL/min/1.73 m2.",
+    "moh_cpg_6e": "MOH Malaysia CPG Management of T2DM, 6th Edition: GLP-1 RA and SGLT2 inhibitors reduce MACE in people with established ASCVD or high CV risk.",
+    "scope": "Pregnancy-related records are out of scope, as in the T2DM review tree."
+  }
+}

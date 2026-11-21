@@ -11,6 +11,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .care_gap import care_gaps_for_user
 from .agent import chat, enqueue_task, process_pending_tasks, process_task
 from .chain import ChainUnavailable, anchor_batch, anchor_research_grant, revoke_research_grant, verify_batch, verify_research_grant
 from .config import get_settings
@@ -404,6 +405,17 @@ def anchor_grant(grant_id: str, user: User = Depends(require_roles("administrato
     db.add(AuditEvent(actor_id=user.id, event_type="research.grant_anchored", entity_type="research_grant", entity_id=grant.id, detail={"chain_grant_hash": grant.chain_grant_hash, "synthetic_only": True}))
     db.commit()
     return {"grant_id": grant.id, "chain_grant_hash": grant.chain_grant_hash, "status": "anchored"}
+
+
+@app.get("/api/care-gaps/sglt2")
+def sglt2_care_gap_review(limit: int = 20, user: User = Depends(require_roles("administrator", "clinician")), db: Session = Depends(get_db)) -> dict:
+    """Read-only medication-list review; clinicians are bounded to their own hospital."""
+    try:
+        result = care_gaps_for_user(db, user, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    db.commit()
+    return result
 
 
 @app.post("/api/agent/chat")

@@ -21,6 +21,7 @@ Keys are valid for 1–1,440 minutes. Account deactivation, role/profile change,
 | `patient_reference_lookup` | Own hospital | All synthetic hospitals | Resolves one exact known synthetic reference; it cannot list or export a cohort. |
 | `patient_record`, `patient_fhir_r4_bundle`, `patient_review_evidence` | Own hospital | All synthetic hospitals | One supplied patient UUID at a time. FHIR is the documented R4 subset only. |
 | `review_queue` | Own hospital | All synthetic hospitals | Maximum 20 evidence-linked alerts; read only. |
+| `sglt2_care_gap_review` | Own hospital | All synthetic hospitals | Maximum 50 records meeting ASCVD / eGFR < 60 with no active, verified SGLT2-inhibitor entry; clinician review list only, never a prescription. |
 | `governance_summary`, `mcp_activity`, `regional_aggregate` | No | Yes | Governance is patient-free; regional aggregate remains small-cell-protected and fails closed until source integrity is verified. |
 
 There are no tools for bulk database export, filesystem/shell, arbitrary SQL, credentials, key management, FHIR import, scan execution, alert acknowledgement, referral attestation, patient contact, data injection, chain writes, grant changes, tamper/restore, diagnosis, prescribing, triage or referral orders.

@@ -8,7 +8,8 @@ declare
     'alerts', 'source_batches', 'research_grants', 'audit_events',
     'governance_reviews', 'notification_attempts', 'agent_conversations',
     'agent_messages', 'delegated_tasks', 'mdt_reviews', 'mcp_demo_sessions',
-    'simulation_runs', 'live_status_snapshots', 'patient_contact_consents', 'patient_messages'
+    'simulation_runs', 'live_status_snapshots', 'patient_contact_consents', 'patient_messages',
+    'medication_statements'
   ];
 begin
   foreach table_name in array tables loop

@@ -224,7 +224,7 @@ def test_official_mcp_client_handshake_and_reads(access):
                         initialized = await session.initialize()
                         assert initialized.serverInfo.name == "Sentinel Network"
                         tools = await session.list_tools()
-                        assert {tool.name for tool in tools.tools} == {"service_status", "patient_record", "patient_reference_lookup", "patient_fhir_r4_bundle", "patient_review_evidence", "review_queue", "terminology_catalogue", "integrity_status", "governance_summary", "mcp_activity", "regional_aggregate"}
+                        assert {tool.name for tool in tools.tools} == {"service_status", "patient_record", "patient_reference_lookup", "patient_fhir_r4_bundle", "patient_review_evidence", "review_queue", "sglt2_care_gap_review", "terminology_catalogue", "integrity_status", "governance_summary", "mcp_activity", "regional_aggregate"}
                         status = await session.call_tool("service_status", {})
                         assert not status.isError
                         patient = await session.call_tool("patient_record", {"patient_id": access.patients[0].id})

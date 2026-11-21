@@ -83,8 +83,47 @@ SNOMED_CONDITIONS: dict[str, dict[str, str | None]] = {
         # when supplied, otherwise record that no source release was provided.
         "version": None,
         "verification_source": "SNOMED CT International browser / Global Patient Set documentation",
-    }
+    },
+    # ASCVD demo subset, verified 2026-11-21 (concept id, FSN and active status)
+    # against public SNOMED CT concept listings linked in README.
+    "22298006": {
+        "display": "Myocardial infarction (disorder)",
+        "version": None,
+        "verification_source": "SNOMED CT concept 22298006 (active), HL7 CREDS MyocardialInfarction value set",
+        "group": "ascvd",
+    },
+    "230690007": {
+        "display": "Cerebrovascular accident (disorder)",
+        "version": None,
+        "verification_source": "SNOMED CT concept 230690007 (active), US NLM VSAC stroke value set",
+        "group": "ascvd",
+    },
+    "399957001": {
+        "display": "Peripheral arterial occlusive disease (disorder)",
+        "version": None,
+        "verification_source": "SNOMED CT concept 399957001 (active), HL7 CREDS PeripheralArterialOcclusiveDisease value set",
+        "group": "ascvd",
+    },
 }
+ASCVD_SNOMED_CODES = frozenset(code for code, entry in SNOMED_CONDITIONS.items() if entry.get("group") == "ascvd")
+T2DM_SNOMED_CODE = "44054006"
+
+# WHO ATC subset for the synthetic medication list. Verified 2026-11-21 against
+# the WHOCC ATC/DDD Index (A10BA, A10BK; index page last updated 2024-12-27).
+ATC_SYSTEM = "http://www.whocc.no/atc"
+ATC_INDEX_DATE = "2024-12-27"
+ATC_MEDICATIONS: dict[str, dict[str, str]] = {
+    "A10BA02": {"display": "metformin", "class": "biguanide"},
+    "A10BK01": {"display": "dapagliflozin", "class": "sglt2_inhibitor"},
+    "A10BK03": {"display": "empagliflozin", "class": "sglt2_inhibitor"},
+}
+SGLT2_ATC_GROUP = "A10BK"
+
+
+def verified_medication(system: str | None, code: str | None) -> dict[str, str] | None:
+    if system != ATC_SYSTEM or not code:
+        return None
+    return ATC_MEDICATIONS.get(code)
 
 
 class TerminologyError(ValueError):

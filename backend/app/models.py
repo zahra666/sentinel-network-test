@@ -83,6 +83,7 @@ class Patient(Base):
     observations: Mapped[list["Observation"]] = relationship(back_populates="patient", cascade="all, delete-orphan")
     conditions: Mapped[list["Condition"]] = relationship(back_populates="patient", cascade="all, delete-orphan")
     diagnostic_reports: Mapped[list["DiagnosticReport"]] = relationship(back_populates="patient", cascade="all, delete-orphan")
+    medications: Mapped[list["MedicationStatement"]] = relationship(back_populates="patient", cascade="all, delete-orphan")
 
 
 class Observation(Base):
@@ -164,6 +165,33 @@ class DiagnosticReport(Base):
     fhir_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     provenance: Mapped[dict] = mapped_column(JSON, default=dict)
     patient: Mapped[Patient] = relationship(back_populates="diagnostic_reports")
+
+
+class MedicationStatement(Base):
+    """Synthetic current-medication list entry (read-only evidence, never an order).
+
+    Stored internally for the SGLT2 care-gap review; not exposed as a FHIR
+    resource in this MVP. The original source coding is retained separately from
+    the verified ATC mapping, and unverified entries cannot drive a rule.
+    """
+    __tablename__ = "medication_statements"
+    __table_args__ = (UniqueConstraint("source_id", "version", name="uq_medication_source_version"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    patient_id: Mapped[str] = mapped_column(ForeignKey("patients.id"), index=True)
+    source_id: Mapped[str] = mapped_column(String(96), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    source_coding_system: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    source_code: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    source_display: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    atc_code: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    atc_display: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    terminology_status: Mapped[str] = mapped_column(String(48), default="needs_terminology_review", index=True)
+    effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
+    patient: Mapped[Patient] = relationship(back_populates="medications")
 
 
 class Scan(Base):

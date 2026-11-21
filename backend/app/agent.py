@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .chain import verify_batch
+from .care_gap import care_gaps_for_user
 from .outreach import draft_for_open_alerts, draft_message, find_reference
 from .models import AgentConversation, AgentMessage, AuditEvent, DelegatedTask, Observation, Patient, SourceBatch, User
 
@@ -83,15 +84,55 @@ def chat(db: Session, user: User, content: str, conversation_id: str | None = No
         events.append({"type": "integrity_verifier", "task_id": task.id})
     elif any(word in text for word in ("email", "e-mail", "remind", "message patient", "contact patient")):
         answer, events = _draft_reminders(db, user, content)
+    elif _is_sglt2_review(text):
+        answer, events = _sglt2_review(db, user)
     elif "patient" in text or "evidence" in text:
         answer = "For an evidence review, open an authorised patient record and choose ‘Delegate evidence review’. I will enforce your organisation boundary and return only rule evidence and data-quality context."
     elif "regional" in text or "district" in text:
         answer = "Regional analysis is limited to authorised, fixed aggregate queries with denominator and small-cell controls. I can hand that to the aggregate-analysis subagent after grant verification."
     else:
-        answer = "I am Goola Agent. I can queue an authorised evidence review, integrity verification, fixed aggregate-analysis handoff, or an administrator-approved crawl of MOH/MEMS public guidance. I can also draft patient reminder emails (try: ‘email patients with open alerts’ or ‘remind SYN-DM-001’); a staff member must approve each one before it is sent. I do not diagnose, prescribe, or access data outside your role."
+        answer = "I am Goola Agent. I can queue an authorised evidence review, integrity verification, fixed aggregate-analysis handoff, or an administrator-approved crawl of MOH/MEMS public guidance. I can list T2DM records with ASCVD or eGFR < 60 and no active SGLT2-inhibitor entry for clinician medication review (try: ‘list T2DM patients with ASCVD or eGFR <60 not yet on SGLT2-i’). I can also draft patient reminder emails (try: ‘email patients with open alerts’ or ‘remind SYN-DM-001’); a staff member must approve each one before it is sent. I do not diagnose, prescribe, or access data outside your role."
     db.add(AgentMessage(conversation_id=conversation.id, role="assistant", content=answer, tool_events=events))
     db.add(AuditEvent(actor_id=user.id, event_type="agent.chat", entity_type="agent_conversation", entity_id=conversation.id, detail={"tool_events": events}))
     return {"conversation_id": conversation.id, "message": answer, "tool_events": events}
+
+
+def _is_sglt2_review(text: str) -> bool:
+    compact = text.replace("-", "").replace(" ", "")
+    return "sglt2" in compact or "caregap" in compact
+
+
+_STATE_LABEL = {
+    "review_candidate": "for medication review",
+    "below_initiation_threshold": "eGFR below initiation threshold",
+    "medication_list_needs_review": "medication list needs terminology review",
+    "insufficient_evidence": "insufficient evidence",
+}
+
+
+def _sglt2_review(db: Session, user: User) -> tuple[str, list[dict]]:
+    if user.role not in {"administrator", "clinician"}:
+        return "Only administrators and clinicians can run the SGLT2 medication-list review.", []
+    result = care_gaps_for_user(db, user, limit=50)
+    counts = result["counts"]
+    scope = "your organisation" if result["scope"] == "organisation" else "all three synthetic hospitals"
+    candidates = [row for row in result["records"] if row["state"] == "review_candidate"]
+    lines = [f"I reviewed {result['reviewed_records']} synthetic T2DM records in {scope} against the ASCVD / CKD-EPI eGFR < 60 criterion.",
+             f"{counts.get('review_candidate', 0)} meet the criterion with no active, verified SGLT2-inhibitor entry; "
+             f"{counts.get('on_sglt2_inhibitor', 0)} meeting it are already on one."]
+    if candidates:
+        shown = ", ".join(f"{row['patient_reference']} ({' + '.join('ASCVD' if c['criterion'] == 'ascvd' else 'eGFR ' + format(c['egfr'], 'g') for c in row['criteria_met'])})" for row in candidates[:10])
+        more = f" and {len(candidates) - 10} more" if len(candidates) > 10 else ""
+        lines.append(f"For clinician medication review: {shown}{more}.")
+    others = [f"{counts[state]} {label}" for state, label in _STATE_LABEL.items() if state != "review_candidate" and counts.get(state)]
+    if others:
+        lines.append("Not listed as gaps: " + "; ".join(others) + ".")
+    lines.append("This is a review list, not a prescription; the clinician decides.")
+    event = {"type": "sglt2_care_gap", "rule_version": result["rule_version"], "counts": counts,
+             "records": [{"patient_reference": row["patient_reference"], "organisation": row["organisation"], "state": row["state"],
+                          "criteria": [c["condition"] if c["criterion"] == "ascvd" else f"eGFR {c['egfr']:g}" for c in row["criteria_met"]]}
+                         for row in result["records"]]}
+    return " ".join(lines), [event]
 
 
 def _draft_reminders(db: Session, user: User, content: str) -> tuple[str, list[dict]]:

@@ -99,6 +99,24 @@ The committed migrations establish the schema, time-bounded MCP-demo sessions an
 
 Use a server-only Postgres connection string for `DATABASE_URL` on Render. Do not put that URL, a Supabase service key, or a private key in `VITE_*` variables or the static site.
 
+## SGLT2 medication-list review (care gap)
+
+Goola can answer "list T2DM patients with ASCVD or eGFR <60 not yet on SGLT2-i". It runs a deterministic, read-only review (`backend/app/care_gap.py`, rule `sglt2-care-gap-demo-v1`) over the synthetic cohort and returns a **clinician review list**. It reads the medication list; it never recommends a drug for an individual, places an order, triages or contacts anyone.
+
+| State | Meaning |
+| --- | --- |
+| `review_candidate` | Confirmed T2DM plus a criterion (active confirmed ASCVD condition, or latest CKD-EPI eGFR < 60), eGFR ≥ 20, and no active, verified ATC `A10BK` entry. Listed for clinician medication review. |
+| `below_initiation_threshold` | Criterion met but eGFR < 20, below the guideline initiation threshold. Listed separately, not as a gap. |
+| `medication_list_needs_review` | Criterion met but an active medication has an unmapped code, so SGLT2-inhibitor use cannot be ruled out. |
+| `insufficient_evidence` | ASCVD with no comparable CKD-EPI eGFR, or no assessable evidence at all. Missing, ambiguous or incompatible eGFR is never compared. |
+| `on_sglt2_inhibitor` / `criterion_not_met` / `out_of_scope` | Counted only. Pregnancy-related records are out of scope, as in the T2DM review tree. |
+
+A stopped SGLT2-inhibitor entry is not current use. Corrected eGFR results supersede earlier versions of the same source record. Criteria references: ADA Standards of Care in Diabetes 2026 (SGLT2 inhibitor for T2D with ASCVD; for T2D with CKD, initiate at eGFR ≥ 20) and MOH Malaysia CPG T2DM 6th Edition (SGLT2-i reduce MACE in established ASCVD). Albuminuria (UACR) is not modelled, so CKD is identified by eGFR only.
+
+Access: `GET /api/care-gaps/sglt2?limit=1..50` for administrators (all hospitals) and clinicians (own hospital only); every call is audited (`care_gap.sglt2_reviewed`). Researchers and CAIO have no browser access. The read-only MCP tool `sglt2_care_gap_review` uses the existing clinical boundary (clinician key: own hospital; CAIO key: synthetic system-wide).
+
+Synthetic multimorbidity: about 1 in 5 profiles carry an ASCVD condition, about 1 in 6 have a CKD-EPI eGFR of 32–58, one per 100 has eGFR 17, and roughly 40% of eligible profiles have an active SGLT2 inhibitor. Fixtures include a stopped SGLT2-inhibitor entry (`SYN-DM-035`) and an unmapped local medication code (`SYN-DM-065`). **An existing local database must be deleted (`backend/sentinel.db`) and reseeded to receive these records**; cloud deployments must apply `supabase/migrations/20261121130000_add_medication_statements.sql` and seed through the backend (`SEED_SYNTHETIC_DATA=true`). `supabase/seed_synthetic.sql` does not include medications or ASCVD conditions.
+
 ## Healthcare interoperability — focused FHIR R4 MVP
 
 The API adds a deliberately bounded **HL7 FHIR R4 (4.0.1) JSON** exchange layer over the existing SQL tables. It is not a full FHIR server, a profile-validation service, a terminology server, or a production interoperability claim. All exchanges remain synthetic-only and require an authenticated administrator or clinician; the existing clinician organisation boundary applies on every import and export. Researchers remain aggregate-only.
@@ -124,9 +142,13 @@ This is a small, reviewable catalogue—not a replacement for hospital terminolo
 | Glucose, mass | `2345-7` | `mmol/L` derived from `mg/dL` | Only the explicit `mg/dL ÷ 18.0156` conversion is supported. |
 | Creatinine | `2160-0` | `mg/dL` | Stored for provenance; it is not used as a substitute for eGFR. |
 | eGFR, CKD-EPI | `62238-1` | `mL/min/{1.73_m2}` | The CKD-EPI creatinine-based equation remains part of the code meaning; unspecified/different equations are not combined in a trend. |
-| Type 2 diabetes condition | `http://snomed.info/sct` `44054006` | n/a | Single verified synthetic-demo condition concept only. Incoming terminology version is preserved when supplied. No SNOMED CT release is bundled or redistributed. |
+| Type 2 diabetes condition | `http://snomed.info/sct` `44054006` | n/a | Index condition for every synthetic profile. Incoming terminology version is preserved when supplied. No SNOMED CT release is bundled or redistributed. |
+| ASCVD conditions | SNOMED CT `22298006` Myocardial infarction, `230690007` Cerebrovascular accident, `399957001` Peripheral arterial occlusive disease | n/a | Multimorbidity subset for the SGLT2 medication-list review only. Verified 2026-11-21 (concept id, fully specified name, active status). |
+| Medications | WHO ATC (`http://www.whocc.no/atc`) `A10BA02` metformin, `A10BK01` dapagliflozin, `A10BK03` empagliflozin; class `A10BK` = SGLT2 inhibitors | n/a | Internal `medication_statements` table, not a FHIR resource in this MVP. Unmapped local codes are kept with `needs_terminology_review` and never treated as "not on SGLT2-i". Verified 2026-11-21 against the WHOCC ATC/DDD Index (last updated 2024-12-27). |
 
 The selection rationale is based on the LOINC component/property/system/scale/method and units, rather than names alone. Catalogue verification links: [HL7 FHIR R4 Observation](https://hl7.org/fhir/R4/observation.html), [DiagnosticReport](https://hl7.org/fhir/R4/diagnosticreport.html), [Condition](https://hl7.org/fhir/R4/condition.html), [LOINC 4548-4](https://loinc.org/4548-4), [LOINC 59261-8](https://loinc.org/59261-8), [LOINC 14749-6](https://loinc.org/14749-6), [LOINC 62238-1](https://loinc.org/62238-1), [UCUM specification](https://ucum.org/ucum), [NGSP IFCC conversion](https://ngsp.org/ifcc.asp), and [SNOMED CT documentation for 44054006](https://docs.snomed.org/snomed-ct-practical-guides/snomed-ct-clinical-decision-support-guide/1-introduction/1.1-overview).
+
+Additional verification links for the ASCVD and medication subset: [SNOMED CT 22298006](https://findacode.com/snomed/22298006--myocardial-infarction.html), [SNOMED CT 230690007](https://findacode.com/snomed/230690007--cerebrovascular-accident.html), [SNOMED CT 399957001](https://www.findacode.com/snomed/399957001--peripheral-arterial-occlusive-disease.html), [HL7 CREDS PAOD value set](https://build.fhir.org/ig/HL7/fhir-registry-protocols-ig/ValueSet-PeripheralArterialOcclusiveDisease.json.html), [WHOCC ATC A10BK](https://atcddd.fhi.no/atc_ddd_index/?code=A10BK) and [WHOCC ATC A10BA02](https://www.whocc.no/atc_ddd_index/?showdescription=yes&code=A10BA02).
 
 The importer validates only this UCUM subset: `%`, `mmol/mol`, `mmol/L`, `mg/dL`, and `mL/min/{1.73_m2}`. Any other unit code, or a recognised LOINC/unit mismatch, is rejected rather than normalised speculatively.
 

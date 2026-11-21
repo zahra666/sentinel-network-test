@@ -10,6 +10,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import select
 from starlette.responses import JSONResponse
 
+from .care_gap import sglt2_care_gaps
 from .chain import verify_batch
 from .config import get_settings
 from .db import SessionLocal, initialise_database
@@ -18,7 +19,7 @@ from .governance import build_governance_dashboard, mcp_activity_summary
 from .guideline_tree import assessment
 from .mcp_access import valid_key
 from .models import AgentAccessKey, Alert, AuditEvent, Condition, DiagnosticReport, Finding, MdtReview, Observation, Organization, Patient, SourceBatch
-from .terminology import CATALOGUE_VERIFIED_ON, LAB_TERMS, LOINC_SYSTEM, LOINC_VERSION, SNOMED_CONDITIONS, SNOMED_SYSTEM, UCUM_SYSTEM
+from .terminology import ATC_INDEX_DATE, ATC_MEDICATIONS, ATC_SYSTEM, CATALOGUE_VERIFIED_ON, LAB_TERMS, LOINC_SYSTEM, LOINC_VERSION, SNOMED_CONDITIONS, SNOMED_SYSTEM, UCUM_SYSTEM
 
 _key_id: ContextVar[str | None] = ContextVar("mcp_key_id", default=None)
 settings = get_settings()
@@ -270,6 +271,14 @@ def review_queue(limit: int = 10) -> dict:
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False})
+def sglt2_care_gap_review(limit: int = 20) -> dict:
+    """List up to 50 synthetic T2DM records that meet a guideline criterion (ASCVD or CKD-EPI eGFR < 60) and have no active, verified SGLT2-inhibitor entry, within the authorised clinician/CAIO boundary. Clinician review list only; never a prescription."""
+    with SessionLocal() as db:
+        organisation_id = authorize_clinical_listing(db, "sglt2_care_gap_review")
+        return sglt2_care_gaps(db, organisation_id, limit)
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False})
 def terminology_catalogue() -> dict:
     """Read the small verified diabetes demo terminology catalogue; it is not a terminology server and never invents mappings."""
     with SessionLocal() as db:
@@ -280,6 +289,7 @@ def terminology_catalogue() -> dict:
         "limitations": "Small verified demo subset only. Unknown or ambiguous codes require terminology review and cannot drive detection.",
         "loinc": [{"system": LOINC_SYSTEM, "version": LOINC_VERSION, "code": item.loinc_code, "display": item.display, "accepted_ucum": list(item.accepted_ucum), "canonical_ucum": item.canonical_ucum, "selection_basis": item.selection_basis, "method": item.method} for item in LAB_TERMS.values()],
         "snomed": [{"system": SNOMED_SYSTEM, "code": code, **entry} for code, entry in SNOMED_CONDITIONS.items()],
+        "atc": [{"system": ATC_SYSTEM, "index_last_updated": ATC_INDEX_DATE, "code": code, **entry} for code, entry in ATC_MEDICATIONS.items()],
         "ucum_system": UCUM_SYSTEM,
     }
 

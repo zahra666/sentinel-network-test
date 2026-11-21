@@ -2,3 +2,5 @@
 
 .brand-logo{object-fit:cover;padding:0;background:#e9f6ff;box-shadow:0 0 0 1px rgba(118,226,199,.35)}.brand>span:last-child{line-height:1.25}.brand b{font-size:17px}.sidebar .brand>span:last-child{font-size:11px;color:#9fb4b9}.login-brand .brand-logo{width:40px;height:40px;border-radius:11px}.goola-mascot{width:132px;height:132px;border-radius:24px;object-fit:cover;display:block;margin:0 0 16px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
 .login-brand b{color:#087b6d;font-size:20px}
+
+.care-gap-table{margin-top:8px;max-height:300px;overflow:auto;background:#fff;border:1px solid #dce6e6;border-radius:8px}.care-gap-table table{width:100%;border-collapse:collapse;font-size:11px}.care-gap-table th,.care-gap-table td{padding:6px 9px;text-align:left;border-bottom:1px solid #eef2f2;text-transform:none}.care-gap-table th{position:sticky;top:0;background:#f4faf8;color:#425d63;font-weight:800}.care-gap-table small{display:block;padding:6px 9px}
