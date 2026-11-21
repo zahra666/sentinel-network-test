@@ -261,15 +261,21 @@ function Patients({ patients, token }: { patients: RecordValue[], token: string 
           <div id={`patients-panel-${activeTab}`} className="patient-tab-panel" role="tabpanel" aria-labelledby={`patients-tab-${activeTab}`} tabIndex={0}>
             {activeTab === "renal" ? renal ? <RenalProfile profile={renal} /> : <div className="renal-empty">No renal profile results for this record.</div>
               : activeTab === "outreach" ? <PatientOutreach patientId={detail.id} token={token} />
-                : <TherapyList treatment={detail.treatment} />}
+                : <>
+                  <TherapyList treatment={detail.treatment} />
+                  {therapy && <div className="card-section">
+                    <h4>Cohort therapy summary</h4>
+                    <p className="body-text">{therapy.patients} synthetic patients · calibrated to Malaysia NDR 2023</p>
+                    <TreatmentSummary summary={therapy} />
+                  </div>}
+                </>}
           </div>
         </div>
       </div> : selected ? patientError ? <div className="error">{patientError}</div> : <div className="loading-line" /> : <Empty title="Select a patient" text="Choose a profile to view results and review status." />}
     </Card>
   </section>
-  {(cohort || therapy) && <section className="patient-support-grid">
+  {cohort && <section className="patient-support-grid">
     {cohort && <Card title="Cohort profile" subtitle={`${cohort.patients} synthetic patients · sex, hypertension and kidney function`} flush><CohortProfile profile={cohort} /></Card>}
-    {therapy && <Card title="Glucose-lowering therapy" subtitle={`${therapy.patients} synthetic patients · calibrated to Malaysia NDR 2023`} flush><TreatmentSummary summary={therapy} /></Card>}
   </section>}
   </div>;
 }
