@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     scheduler_trigger_token: str = ""
     scheduler_mode: str = "local_apscheduler"
     seed_synthetic_data: bool = False
-    seed_patient_count: int = Field(default=100, ge=12, le=10000)
+    seed_patient_count: int = Field(default=500, ge=12, le=10000)
     alert_reminder_minutes: int = 1440
     alert_escalation_minutes: int = 2880
     live_simulation_enabled: bool = True
