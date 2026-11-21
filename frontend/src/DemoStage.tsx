@@ -27,12 +27,12 @@ const SCENARIO = "catch_up";
 async function call(path: string, token: string, method = "GET", body?: RecordValue) {
   const response = await fetch(`${API}${path}`, { method, body: body ? JSON.stringify(body) : undefined, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` } });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(typeof payload.detail === "string" ? payload.detail : `Request failed (HTTP ${response.status}${response.status >= 500 ? " — the server is busy or restarting; try again" : ""})`);
+  if (!response.ok) throw new Error(typeof payload.detail === "string" ? payload.detail : `Request failed (HTTP ${response.status}${response.status >= 500 ? ". The server is busy or restarting; try again" : ""})`);
   return payload;
 }
 
 const clock = (iso?: string) => (iso ? new Date(iso) : new Date()).toLocaleTimeString("en-GB", { timeZone: "Asia/Kuala_Lumpur" });
-const simDate = (iso?: string | null) => iso ? new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
+const simDate = (iso?: string | null) => iso ? new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "Not started";
 
 export default function DemoStage({ token, onExit }: { token: string, onExit: () => void }) {
   const [lines, setLines] = useState<Line[]>([{ id: "boot", kind: "info", text: "sentinel@api:~$ tail -f live_simulation.sql  # statements each step runs" }]);
@@ -131,7 +131,7 @@ export default function DemoStage({ token, onExit }: { token: string, onExit: ()
           {lines.map((line) => <TermLine key={line.id} line={line} />)}
           <div className="demo-cursor">▍</div>
         </div>
-        <div className="demo-term-foot">Synthetic data — demonstration only · writes go through the normal Sync → Analyse → Route scan</div>
+        <div className="demo-term-foot">Synthetic data — demonstration only · Sync → Analyse → Route</div>
       </section>
       <section className="demo-board"><LiveMonitor key={monitorKey} token={token} compact hideControls tickSeconds={TICK_SECONDS} scenario={SCENARIO} /></section>
     </div>

@@ -1,14 +1,20 @@
 import React, { FormEvent, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import aurora from "./assets/sentinel-aurora-v2.png";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
+import "@fontsource/instrument-serif/400.css";
+import "@fontsource/instrument-serif/400-italic.css";
+import {
+  Activity, Bot, Check, ClipboardCheck, Inbox, LayoutDashboard, Link2, LogOut, Mail, Map as MapIcon, Play, Search,
+  Send, Server, ShieldCheck, Users, type LucideIcon,
+} from "lucide-react";
 import goolaIcon from "./assets/goola-icon.png";
 import goolaLoop from "./assets/goola-loop.mp4";
 import LiveMonitor from "./LiveMonitor";
 import DemoStage from "./DemoStage";
 import OutreachPage, { PatientOutreach } from "./Outreach";
+import { Badge, Card, CountUp, Empty, Ring, Sparkline, STATUS_COLORS, Stat, human, toneFor } from "./ui";
 import "./styles.css";
-import "./fhir.css";
-import "./governance.css";
 
 const API = import.meta.env.VITE_API_BASE_URL || "/api";
 type RecordValue = Record<string, any>;
@@ -19,13 +25,26 @@ async function api(path: string, token?: string, options: RequestInit = {}) {
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(options.headers || {}) },
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.detail || "Request failed");
+  if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Request failed");
   return body;
 }
 
-const nav = [
-  ["overview", "Overview", "◫"], ["live", "Live Monitor", "◔"], ["patients", "Patients", "◎"], ["alerts", "Review Queue", "◉"], ["guideline", "Guideline Review", "⌘"], ["agent", "Goola Agent", "✦"], ["outreach", "Patient Outreach", "✉"], ["regional", "Regional Surveillance", "◌"], ["ledger", "Integrity Ledger", "⛓"], ["governance", "AI Governance", "◈"], ["status", "System Status", "◇"],
+type NavItem = { id: string, label: string, icon: LucideIcon, group: string };
+const nav: NavItem[] = [
+  { id: "overview", label: "Overview", icon: LayoutDashboard, group: "Clinical" },
+  { id: "live", label: "Live Monitor", icon: Activity, group: "Clinical" },
+  { id: "patients", label: "Patients", icon: Users, group: "Clinical" },
+  { id: "alerts", label: "Review Queue", icon: Inbox, group: "Clinical" },
+  { id: "guideline", label: "Guideline Review", icon: ClipboardCheck, group: "Clinical" },
+  { id: "agent", label: "Goola Agent", icon: Bot, group: "Agent" },
+  { id: "outreach", label: "Patient Outreach", icon: Mail, group: "Agent" },
+  { id: "regional", label: "Regional Surveillance", icon: MapIcon, group: "Research" },
+  { id: "ledger", label: "Integrity Ledger", icon: Link2, group: "Research" },
+  { id: "governance", label: "AI Governance", icon: ShieldCheck, group: "Administration" },
+  { id: "status", label: "System Status", icon: Server, group: "Administration" },
 ];
+
+const roleLabel: Record<string, string> = { administrator: "Administrator", clinician: "Clinician", researcher: "Researcher", caio: "Governance reviewer" };
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem("sentinel-token") || "");
@@ -36,6 +55,7 @@ function App() {
   const [alerts, setAlerts] = useState<RecordValue[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [demo, setDemo] = useState(() => new URLSearchParams(window.location.search).has("demo"));
 
   const refresh = async () => {
@@ -66,13 +86,14 @@ function App() {
 
   if (!token) return <Login onLogin={(data) => { setToken(data.access_token); setUser(data.user); }} />;
   const governanceRole = user?.role === "administrator" || user?.role === "caio";
-  const visibleNav = nav.filter(([id]) => {
+  const visibleNav = nav.filter(({ id }) => {
     if (user?.role === "caio") return ["governance", "status"].includes(id);
     if (user?.role === "researcher") return ["regional", "ledger", "status"].includes(id);
     return id !== "governance" || governanceRole;
   });
+  const runScan = async () => { try { setScanning(true); await api("/scans/run", token, { method: "POST" }); await refresh(); } catch (err: any) { setError(err.message); } finally { setScanning(false); } };
   const content = {
-    overview: <Overview data={overview} onRun={async () => { await api("/scans/run", token, { method: "POST" }); await refresh(); }} />,
+    overview: <Overview data={overview} token={token} />,
     live: <LiveMonitor token={token} onDemo={() => setDemo(true)} />,
     patients: <Patients patients={patients} token={token} />,
     alerts: <Alerts alerts={alerts} token={token} refresh={refresh} />,
@@ -81,47 +102,256 @@ function App() {
     outreach: <OutreachPage token={token} />,
     regional: <Regional token={token} />,
     ledger: <Ledger token={token} isAdministrator={user?.role === "administrator"} />,
-    governance: governanceRole ? <Governance token={token} /> : <Empty label="AI Governance is available only to administrators and CAIO reviewers." />,
+    governance: governanceRole ? <Governance token={token} /> : <Empty title="Not available for this role" />,
     status: <Status token={token} />,
   }[page];
+  const actions = page === "overview" && overview ? <button className="primary" disabled={scanning} onClick={runScan}><Play size={15} />{scanning ? "Running scan…" : "Run scan"}</button> : null;
   const canDemo = user?.role === "administrator" || user?.role === "clinician";
   if (demo && canDemo) return <DemoStage token={token} onExit={() => { setDemo(false); setPage("live"); if (window.location.search) window.history.replaceState(null, "", window.location.pathname); }} />;
+  const groups = [...new Set(visibleNav.map((item) => item.group))];
+  const current = nav.find((item) => item.id === page);
   return <div className="app-shell">
-    <aside className="sidebar"><div className="brand"><img className="brand-mark brand-logo" src={goolaIcon} alt="Goola" /><span><b>Goola</b><br/>Diabetes care agent</span></div><div className="environment">SYNTHETIC DEMO</div><nav>{visibleNav.map(([id, label, icon]) => <button key={id} className={page === id ? "nav active" : "nav"} onClick={() => setPage(id)}><span>{icon}</span>{label}</button>)}</nav><div className="sidebar-foot"><span className="dot"/> Local-first integrity<br/>Clinician review required</div></aside>
-    <main className="main"><header className="topbar"><div><p className="eyebrow">GOOLA / CLINICAL REVIEW</p><h1>{nav.find((item) => item[0] === page)?.[1]}</h1></div><div className="user-menu"><span className="role-pill">{user?.role || "authorised user"}</span><div className="avatar">{(user?.email || "U")[0].toUpperCase()}</div><button className="link-button" onClick={() => setToken("")}>Sign out</button></div></header>
-      <div className="safety-banner">Synthetic data — demonstration only. CPG-linked evidence supports clinician review; it does not diagnose, prescribe, triage, or submit referrals.</div>
-      {error && <div className="error">{error}</div>}{loading && <div className="loading">Refreshing verified local state…</div>}{content}
+    <aside className="sidebar">
+      <div className="brand"><img className="brand-mark brand-logo" src={goolaIcon} alt="" /><div><b>Goola</b><span>Diabetes care intelligence</span></div></div>
+      <nav>{groups.map((group) => <div className="nav-group" key={group}><p>{group}</p>{visibleNav.filter((item) => item.group === group).map(({ id, label, icon: Icon }) =>
+        <button key={id} className={page === id ? "nav active" : "nav"} onClick={() => setPage(id)} aria-current={page === id ? "page" : undefined}><Icon size={17} strokeWidth={1.9} />{label}</button>)}</div>)}</nav>
+    </aside>
+    <main className="main">
+      <header className="topbar">
+        <div className="page-title"><span className="kicker">{current?.group}</span><h1>{current?.label}</h1></div>
+        <div className="topbar-right">
+          {actions}
+          <span className="env-badge">Synthetic data</span>
+          <div className="user-chip"><div className="avatar">{(user?.email || "U")[0].toUpperCase()}</div><div><b>{user?.email?.split("@")[0]?.replace(".", " ") || "User"}</b><span>{roleLabel[user?.role] || "Authorised user"}</span></div></div>
+          <button className="icon-button" title="Sign out" aria-label="Sign out" onClick={() => setToken("")}><LogOut size={17} /></button>
+        </div>
+        {loading && <span className="progress" />}
+      </header>
+      <div className="content">{error && <div className="error">{error}</div>}{content}<p className="safety-note">{SAFETY_NOTE}</p></div>
     </main>
   </div>;
 }
 
 function Login({ onLogin }: { onLogin: (data: RecordValue) => void }) {
-  const [email, setEmail] = useState("admin@sentinel.demo"); const [password, setPassword] = useState("12345"); const [error, setError] = useState("");
-  const submit = async (event: FormEvent) => { event.preventDefault(); try { setError(""); onLogin(await api("/auth/login", undefined, { method: "POST", body: JSON.stringify({ email, password }) })); } catch (err: any) { setError(err.message); } };
-  return <div className="login-shell" style={{ backgroundImage: `linear-gradient(100deg, rgba(4,17,28,.94), rgba(7,29,39,.52)), url(${aurora})` }}><section className="login-card"><div className="brand login-brand"><img className="brand-mark brand-logo" src={goolaIcon} alt="Goola" /><span><b>Goola</b></span></div><p className="eyebrow">AUTHORISED SYNTHETIC DEMO</p><h1>Evidence before action.</h1><p>Local surveillance, CPG review, protected research, and verifiable integrity—without autonomous clinical decisions.</p><form onSubmit={submit}><label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <div className="error">{error}</div>}<button className="primary wide">Enter authorised workspace</button></form><small>Use only the documented synthetic demo accounts.</small></section></div>;
+  const [email, setEmail] = useState("admin@sentinel.demo"); const [password, setPassword] = useState("12345"); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
+  const submit = async (event: FormEvent) => { event.preventDefault(); try { setBusy(true); setError(""); onLogin(await api("/auth/login", undefined, { method: "POST", body: JSON.stringify({ email, password }) })); } catch (err: any) { setError(err.message); } finally { setBusy(false); } };
+  return <div className="login-shell">
+    <section className="login-aside">
+      <div className="brand"><img className="brand-mark brand-logo" src={goolaIcon} alt="" /><div><b>Goola</b><span>Diabetes care intelligence</span></div></div>
+      <div className="login-orbit" aria-hidden="true"><i /><i /><i /><b />{["HbA1c", "eGFR", "UACR", "Fundus exam", "Foot exam"].map((label, index) => <span key={label} className={`signal s${index}`}>{label}</span>)}</div>
+      <div className="login-statement"><h2>Every result reviewed.<br /><em>Every complication caught early.</em></h2></div>
+      <span className="env-badge" title={SAFETY_NOTE}>Synthetic data — demonstration only</span>
+    </section>
+    <section className="login-main"><form className="login-card" onSubmit={submit}>
+      <h1>Sign in</h1>
+      <p>Use your Goola workspace account.</p>
+      <label>Email<input value={email} autoComplete="username" onChange={(event) => setEmail(event.target.value)} /></label>
+      <label>Password<input type="password" value={password} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} /></label>
+      {error && <div className="error">{error}</div>}
+      <button className="primary wide" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+    </form></section>
+  </div>;
 }
 
-function Overview({ data, onRun }: { data: RecordValue | null, onRun: () => Promise<void> }) {
-  const metrics = data?.metrics || {}; const pipeline = data?.pipeline || []; const recentAlerts: RecordValue[] = data?.recent_alerts || [];
-  return <><section className="hero-grid"><div className="welcome"><p className="eyebrow">OVERVIEW</p><h2>Goola Agent is watching the synthetic care flow.</h2><p>Scans, in-app reminders, and review-queue escalation are persisted and visible. Patient reminder emails are drafted by Sentinel Agent and sent only after staff approval (simulated outbox in this demo).</p><button className="primary" onClick={onRun}>Run verified scan now</button></div><div className="aurora-card" style={{ backgroundImage: `linear-gradient(130deg, rgba(5,20,28,.2), rgba(5,20,28,.75)), url(${aurora})` }}><span>INTEGRITY STATUS</span><strong>{metrics.integrity || "Awaiting source batch"}</strong><p>Actual state from the ledger</p></div></section><section className="metric-grid"><Metric label="Monitored profiles" value={metrics.monitored_profiles ?? "—"} detail="Synthetic longitudinal records" icon="◎"/><Metric label="Open review alerts" value={metrics.open_review_alerts ?? "—"} detail="Awaiting clinician acknowledgement" icon="!"/><Metric label="Acknowledged" value={metrics.acknowledged_alerts ?? "—"} detail="Persisted review actions" icon="✓"/><Metric label="Integrity" value={metrics.integrity || "—"} detail="No fabricated receipts" icon="⛓"/></section><section className="two-column"><Panel title="Sentinel pipeline" action="Actual service events"><div className="pipeline">{pipeline.map((item: RecordValue) => <div className="pipeline-step" key={item.stage}><span className={item.state === "completed" ? "step-icon done" : "step-icon"}>✓</span><div><b>{item.stage}</b><p>{item.state} {item.records_received ? `· ${item.records_received} records` : item.patients_evaluated ? `· ${item.patients_evaluated} patients` : item.new_alerts !== undefined ? `· ${item.new_alerts} alerts` : ""}</p></div></div>)}</div></Panel><Panel title="Recent review queue" action="Live alert state"><div className="stack">{recentAlerts.length ? recentAlerts.map((alert: RecordValue) => <div className="queue-row" key={alert.id}><span className="pulse"/><div><b>{alert.patient?.reference}</b><p>{alert.finding?.status?.replaceAll("_", " ")}</p></div><span className="status-tag">{alert.status}</span></div>) : <Empty label="Run a scan to create evidence-linked review alerts."/>}</div></Panel></section></>;
+const pct = (part: number, total: number) => (total ? Math.round((part / total) * 100) : 0);
+
+function Overview({ data, token }: { data: RecordValue | null, token: string }) {
+  const [live, setLive] = useState<RecordValue | null>(null);
+  useEffect(() => { if (data) api("/live/dashboard?points=2", token).then(setLive).catch(() => setLive(null)); }, [token, data]);
+  if (!data) return <div className="skeleton-grid"><i /><i /><i /><i /></div>;
+  const metrics = data.metrics || {}; const pipeline: RecordValue[] = data.pipeline || []; const recentAlerts: RecordValue[] = data.recent_alerts || [];
+  const byStatus: Record<string, number> = live?.current?.by_status || {};
+  const total: number = live?.current?.total || metrics.monitored_profiles || 0;
+  const review = byStatus.evidence_requires_clinician_review || 0;
+  const statuses: RecordValue[] = live?.statuses || [];
+  const stageCount = (item: RecordValue) => item.records_received !== undefined ? `${item.records_received.toLocaleString()} records` : item.patients_evaluated !== undefined ? `${item.patients_evaluated.toLocaleString()} patients` : item.new_alerts !== undefined ? `${item.new_alerts} new alerts` : "";
+  return <>
+    <section className="hero card">
+      <div className="hero-ring"><Ring value={pct(review, total)} size={236} stroke={16}><strong><CountUp value={pct(review, total)} suffix="%" /></strong><span>need review</span></Ring></div>
+      <div className="hero-copy">
+        <span className="kicker">Cohort status</span>
+        <h2><CountUp value={review} /> of {total.toLocaleString()} patients need a clinician today.</h2>
+        <div className="breakdown">{statuses.map((status) => { const count = byStatus[status.key] || 0; return <div className="breakdown-row" key={status.key}>
+          <span className="breakdown-label"><i style={{ background: STATUS_COLORS[status.key] }} />{status.label}</span>
+          <span className="breakdown-bar"><b style={{ width: `${pct(count, total)}%`, background: STATUS_COLORS[status.key] }} /></span>
+          <span className="breakdown-value">{count.toLocaleString()}</span>
+        </div>; })}</div>
+      </div>
+    </section>
+    <section className="stat-grid">
+      <Stat label="Monitored profiles" value={metrics.monitored_profiles ?? 0} icon={Users} />
+      <Stat label="Open review alerts" value={metrics.open_review_alerts ?? 0} icon={Inbox} tone={metrics.open_review_alerts ? "warning" : undefined} />
+      <Stat label="Acknowledged" value={metrics.acknowledged_alerts ?? 0} icon={Check} />
+      <Stat label="Source integrity" value={<Badge tone={toneFor(metrics.integrity)}>{human(metrics.integrity || "pending")}</Badge>} icon={Link2} />
+    </section>
+    <section className="grid-2">
+      <Card title="Scan pipeline">
+        <ol className="stepper">{pipeline.map((item, index) => <li key={item.stage} className={item.state === "completed" ? "done" : ""}>
+          <span className="step-index">{item.state === "completed" ? <Check size={14} strokeWidth={2.5} /> : index + 1}</span>
+          <div><b>{human(item.stage)}</b><span>{stageCount(item) || human(item.state)}</span></div>
+          <Badge tone={toneFor(item.state)}>{human(item.state)}</Badge>
+        </li>)}</ol>
+      </Card>
+      <Card title="Recent alerts" flush>
+        {recentAlerts.length ? <table className="table"><thead><tr><th>Patient</th><th>Finding</th><th>Status</th></tr></thead><tbody>{recentAlerts.map((alert) =>
+          <tr key={alert.id}><td className="strong">{alert.patient?.reference}</td><td><span className="dot-label"><i style={{ background: STATUS_COLORS[alert.finding?.status] }} />{human(alert.finding?.status)}</span></td><td><Badge tone={toneFor(alert.status)}>{human(alert.status)}</Badge></td></tr>)}</tbody></table>
+          : <Empty title="No alerts yet" text="Run a scan to evaluate the latest results." />}
+      </Card>
+    </section>
+  </>;
 }
 
-function Metric({ label, value, detail, icon }: RecordValue) { return <article className="metric"><span className="metric-icon">{icon}</span><div><p>{label}</p><strong>{value}</strong><small>{detail}</small></div><div className="spark"><i/><i/><i/><i/><i/></div></article>; }
-function Panel({ title, action, children }: { title: string, action?: string, children: React.ReactNode }) { return <section className="panel"><header><div><h3>{title}</h3>{action && <p>{action}</p>}</div><span className="panel-status">●</span></header>{children}</section>; }
-function Empty({ label }: { label: string }) { return <div className="empty">{label}</div>; }
+function Patients({ patients, token }: { patients: RecordValue[], token: string }) {
+  const [selected, setSelected] = useState<RecordValue | null>(null); const [detail, setDetail] = useState<RecordValue | null>(null); const [query, setQuery] = useState("");
+  const choose = async (patient: RecordValue) => { setSelected(patient); setDetail(null); setDetail(await api(`/patients/${patient.id}`, token)); };
+  const shown = useMemo(() => { const q = query.trim().toLowerCase(); return q ? patients.filter((p) => `${p.reference} ${p.care_setting} ${p.organization}`.toLowerCase().includes(q)) : patients; }, [patients, query]);
+  return <section className="master-detail">
+    <Card title="Patients" count={patients.length} flush actions={<label className="search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" aria-label="Search patients" /></label>}>
+      <div className="table-scroll"><table className="table selectable"><thead><tr><th>Patient</th><th>Care setting</th><th>Age</th><th>Scope</th></tr></thead><tbody>
+        {shown.map((patient) => <tr key={patient.id} className={selected?.id === patient.id ? "selected" : ""} onClick={() => choose(patient)}>
+          <td><b>{patient.reference}</b><small>{patient.organization}</small></td><td>{patient.care_setting}</td><td className="num">{patient.age_group}</td>
+          <td><Badge tone={patient.pregnancy_related ? "warning" : "neutral"}>{patient.pregnancy_related ? "Scope check" : "In scope"}</Badge></td></tr>)}
+      </tbody></table></div>
+    </Card>
+    <div className="detail-column">
+      {selected ? detail ? <PatientEvidence detail={detail} /> : <Card title={selected.reference}><div className="loading-line" /></Card> : <Card title="Patient record"><Empty title="Select a patient" text="Choose a profile to view results and review status." /></Card>}
+      {detail && <Card title="Outreach"><PatientOutreach patientId={detail.id} token={token} /></Card>}
+    </div>
+  </section>;
+}
 
-function Patients({ patients, token }: { patients: RecordValue[], token: string }) { const [selected, setSelected] = useState<RecordValue | null>(null); const [detail, setDetail] = useState<RecordValue | null>(null); const choose = async (patient: RecordValue) => { setSelected(patient); setDetail(await api(`/patients/${patient.id}`, token)); }; return <section className="workspace-grid"><Panel title="Synthetic profiles" action={`${patients.length} authorised records`}><div className="table">{patients.map((patient) => <button className={selected?.id === patient.id ? "table-row selected" : "table-row"} key={patient.id} onClick={() => choose(patient)}><span><b>{patient.reference}</b><small>{patient.organization}</small></span><span>{patient.care_setting}</span><span>{patient.age_group}</span><span className="mini-tag">{patient.pregnancy_related ? "scope check" : "review"}</span></button>)}</div></Panel><Panel title="Evidence timeline" action="Organisation-scoped"><PatientEvidence detail={detail}/>{detail && <div className="evidence"><PatientOutreach patientId={detail.id} token={token}/></div>}</Panel></section>; }
-function PatientEvidence({ detail }: { detail: RecordValue | null }) { if (!detail) return <Empty label="Select an authorised synthetic profile to inspect source evidence."/>; return <div className="evidence"><div className="patient-heading"><span><b>{detail.reference}</b><p>{detail.care_setting} · BMI {detail.body_mass_index ?? "not recorded"}</p></span><span className="status-tag">{detail.guideline_assessment.status.replaceAll("_", " ")}</span></div><div className="observation-list">{detail.observations.map((observation: RecordValue) => <div key={observation.id}><b>{observation.coding?.display || observation.code}</b><span>{observation.value ?? "—"} {observation.unit}</span><small>{new Date(observation.observed_at).toLocaleDateString()}</small><div className="coding-detail">{observation.coding?.system || "Local source"} · {observation.coding?.code || observation.original_code || observation.code} · UCUM {observation.ucum_unit || "unverified"} · {observation.terminology_status.replaceAll("_", " ")}{observation.egfr_equation ? ` · ${observation.egfr_equation}` : ""}{observation.is_corrected ? " · corrected source version" : ""}</div></div>)}</div>{detail.conditions?.length ? <div className="condition-summary"><b>Recorded conditions</b>{detail.conditions.map((condition: RecordValue) => <span key={condition.id}>{condition.snomed?.display || condition.source_coding?.display || "Unmapped condition"} <small>{condition.snomed?.code || condition.source_coding?.code} · {condition.terminology_status}</small></span>)}</div> : null}<div className="rule-note">{detail.guideline_assessment.considerations?.[0]}</div></div>; }
+const TEST_LABELS: Record<string, string> = { hba1c: "HbA1c", fpg: "Fasting glucose", rpg: "Random glucose", egfr: "eGFR", creatinine: "Creatinine" };
 
-function Alerts({ alerts, token, refresh }: { alerts: RecordValue[], token: string, refresh: () => Promise<void> }) { const act = async (id: string, action: string) => { await api(`/alerts/${id}`, token, { method: "POST", body: JSON.stringify({ action }) }); await refresh(); }; return <Panel title="Evidence-linked review queue" action="Internal in-app routing only"><div className="alerts">{alerts.length ? alerts.map((alert) => <article className="alert-card" key={alert.id}><div><span className="status-tag">{alert.status}</span><h4>{alert.patient?.reference} <small>{alert.patient?.care_setting}</small></h4><p>{alert.finding?.status?.replaceAll("_", " ")}</p><small>{alert.finding?.evidence?.nodes?.find((node: RecordValue) => node.id === "diagnostic-evidence")?.detail}</small></div><div className="alert-actions">{alert.status === "new" && <button className="secondary" onClick={() => act(alert.id, "acknowledge")}>Acknowledge</button>}{alert.status !== "resolved" && <button className="link-button" onClick={() => act(alert.id, "resolve")}>Resolve</button>}</div></article>) : <Empty label="No alerts are available for your organisation."/>}</div></Panel>; }
+function PatientEvidence({ detail }: { detail: RecordValue }) {
+  const status = detail.guideline_assessment.status;
+  const hba1c: number[] = detail.observations.filter((o: RecordValue) => o.code === "hba1c" && o.normalised_value != null).sort((x: RecordValue, y: RecordValue) => +new Date(x.observed_at) - +new Date(y.observed_at)).map((o: RecordValue) => o.normalised_value);
+  return <Card title={detail.reference} subtitle={`${detail.care_setting} · ${detail.organization || ""}${detail.body_mass_index ? ` · BMI ${detail.body_mass_index}` : ""}`} actions={<>{hba1c.length > 1 && <span className="spark-wrap"><small>HbA1c</small><Sparkline values={hba1c} width={96} height={30} /></span>}<Badge tone={toneFor(status)}>{human(status)}</Badge></>} flush>
+    <table className="table compact"><thead><tr><th>Test</th><th className="num">Result</th><th>Date</th><th>Code</th></tr></thead><tbody>
+      {detail.observations.map((observation: RecordValue) => <tr key={observation.id}>
+        <td className="strong">{TEST_LABELS[observation.code] || observation.coding?.display || observation.code}{observation.is_corrected && <Badge tone="info">Corrected</Badge>}</td>
+        <td className="num">{observation.value ?? "N/A"} <small>{observation.unit}</small></td>
+        <td>{new Date(observation.observed_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</td>
+        <td>{observation.terminology_status !== "verified" ? <Badge tone="warning">{human(observation.terminology_status)}</Badge> : <code>{observation.coding?.code || observation.original_code || observation.code}</code>}</td>
+      </tr>)}
+    </tbody></table>
+    {detail.conditions?.length ? <div className="card-section"><h4>Conditions</h4>{detail.conditions.map((condition: RecordValue) => <p key={condition.id} className="kv"><span>{condition.snomed?.display || condition.source_coding?.display || "Unmapped condition"}</span><code>{condition.snomed?.code || condition.source_coding?.code}</code></p>)}</div> : null}
+    {detail.guideline_assessment.considerations?.[0] && <div className="card-section"><h4>Guideline consideration</h4><p className="body-text">{detail.guideline_assessment.considerations[0]}</p></div>}
+  </Card>;
+}
 
-function GuidelineReview({ patients, token }: { patients: RecordValue[], token: string }) { const [patient, setPatient] = useState(""); const [report, setReport] = useState<RecordValue | null>(null); const [selected, setSelected] = useState<string[]>([]); const [message, setMessage] = useState(""); const run = async () => { if (patient) { const next = await api(`/mdt/${patient}/review`, token, { method: "POST" }); setReport(next); setSelected([]); setMessage(""); } }; const options = report?.report.members[2].considerations.filter((item: RecordValue) => item.pathway !== "clinician_review_required") || []; const attest = async () => { if (!report) return; const next = await api(`/mdt/reviews/${report.id}/attest`, token, { method: "POST", body: JSON.stringify({ selected_pathways: selected }) }); setReport(next); setMessage("Attestation saved to the demo audit trail. No referral was sent."); }; return <section className="two-column"><Panel title="Three-member Diabetes MDT" action="Deterministic, cited review roles"><label>Authorised synthetic profile<select value={patient} onChange={(event) => setPatient(event.target.value)}><option value="">Select profile</option>{patients.map((item) => <option value={item.id} key={item.id}>{item.reference} · {item.care_setting}</option>)}</select></label><button className="primary" disabled={!patient} onClick={run}>Generate MDT review brief</button><div className="committee-note"><b>Three roles only:</b> evidence confirmation, data-quality/complexity, and care coordination. This is not an ANN and never submits referrals.</div></Panel><Panel title="Draft clinician review plan" action="Human attestation required">{report ? <div className="mdt-report">{report.report.members.map((member: RecordValue) => <article key={member.member}><span className="member-badge">MDT</span><b>{member.member}</b><p>{member.finding || member.boundary}</p>{member.considerations?.map((item: RecordValue) => <div className="consideration" key={item.pathway}><b>{item.pathway.replaceAll("_", " ")}</b><small>{item.rationale}</small></div>)}</article>)}<div className="rule-note">{report.report.draft_clinician_review_plan.join(" ")}</div>{options.length > 0 && !report.clinician_attested_at && <div className="attestation"><b>Clinician attestation (demo)</b>{options.map((item: RecordValue) => <label key={item.pathway}><input type="checkbox" checked={selected.includes(item.pathway)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, item.pathway] : current.filter((pathway) => pathway !== item.pathway))}/>{item.pathway.replaceAll("_", " ")}</label>)}<button className="secondary" disabled={!selected.length} onClick={attest}>Record clinician attestation</button></div>}{report.clinician_attested_at && <div className="success">Attested review only — no referral or treatment action was created.</div>}{message && <div className="success">{message}</div>}</div> : <Empty label="Generate a review brief from an authorised synthetic record."/>}</Panel></section>; }
+function Alerts({ alerts, token, refresh }: { alerts: RecordValue[], token: string, refresh: () => Promise<void> }) {
+  const act = async (id: string, action: string) => { await api(`/alerts/${id}`, token, { method: "POST", body: JSON.stringify({ action }) }); await refresh(); };
+  const open = alerts.filter((alert) => alert.status !== "resolved").length;
+  return <Card title="Review queue" count={open} flush>
+    {alerts.length ? <table className="table"><thead><tr><th>Patient</th><th>Finding</th><th>Evidence</th><th>Status</th><th /></tr></thead><tbody>
+      {alerts.map((alert) => <tr key={alert.id}>
+        <td><b>{alert.patient?.reference}</b><small>{alert.patient?.care_setting}</small></td>
+        <td>{human(alert.finding?.status)}</td>
+        <td className="wrap">{alert.finding?.evidence?.nodes?.find((node: RecordValue) => node.id === "diagnostic-evidence")?.detail}</td>
+        <td><Badge tone={toneFor(alert.status)}>{human(alert.status)}</Badge></td>
+        <td className="row-actions">{alert.status === "new" && <button className="secondary small" onClick={() => act(alert.id, "acknowledge")}>Acknowledge</button>}{alert.status !== "resolved" && <button className="ghost small" onClick={() => act(alert.id, "resolve")}>Resolve</button>}</td>
+      </tr>)}
+    </tbody></table> : <Empty title="Queue is clear" text="New alerts appear here after each scan." />}
+  </Card>;
+}
 
-function AgentConsole({ token }: { token: string }) { const [messages, setMessages] = useState<RecordValue[]>([{ role: "assistant", content: "I am Goola Agent. I can queue an authorised evidence review, integrity verification, regional-analysis handoff, an administrator-approved MOH/MEMS crawl, draft patient reminder emails for your approval, or list T2DM records with ASCVD or eGFR < 60 and no SGLT2-inhibitor entry for clinician medication review." }]); const [text, setText] = useState(""); const [conversation, setConversation] = useState<string | undefined>(); const [busy, setBusy] = useState(false); const send = async (event: FormEvent) => { event.preventDefault(); if (!text.trim()) return; const outgoing = text; setText(""); setMessages((items) => [...items, { role: "user", content: outgoing }]); setBusy(true); try { const reply = await api("/agent/chat", token, { method: "POST", body: JSON.stringify({ content: outgoing, conversation_id: conversation }) }); setConversation(reply.conversation_id); setMessages((items) => [...items, { role: "assistant", content: reply.message, tool_events: reply.tool_events }]); } catch (err: any) { setMessages((items) => [...items, { role: "assistant", content: `Unable to complete request: ${err.message}` }]); } finally { setBusy(false); } }; return <section className="agent-layout"><div className="agent-hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(5,18,27,.94), rgba(5,18,27,.35)), url(${aurora})` }}><p className="eyebrow">AUTHORISED ORCHESTRATION</p><video className="goola-mascot" src={goolaLoop} autoPlay loop muted playsInline aria-label="Goola mascot" /><h2>Goola Agent</h2><p>Every tool call is role-scoped, persisted, and reviewable. Public crawling is restricted to approved guideline domains and never receives patient data.</p><div className="agent-tools"><span>Evidence review</span><span>Integrity verifier</span><span>Aggregate handoff</span><span>Allowlisted crawl</span><span>Patient reminder drafts</span><span>SGLT2 medication review</span></div></div><div className="chat"><div className="messages">{messages.map((message, index) => <div key={index} className={`message ${message.role}`}><span>{message.role === "user" ? "You" : "Goola"}</span><p>{message.content}</p>{message.tool_events?.length ? <small>Task queued: {message.tool_events.map((item: RecordValue) => item.type).join(", ")}</small> : null}{message.tool_events?.filter((item: RecordValue) => item.type === "sglt2_care_gap").map((item: RecordValue, eventIndex: number) => <div key={eventIndex} className="care-gap-table"><table><thead><tr><th>Patient</th><th>Hospital</th><th>Criterion met</th><th>Review state</th></tr></thead><tbody>{(item.records as RecordValue[]).map((row: RecordValue) => <tr key={row.patient_reference}><td>{row.patient_reference}</td><td>{row.organisation}</td><td>{(row.criteria as string[]).join(" + ") || "—"}</td><td>{String(row.state).replace(/_/g, " ")}</td></tr>)}</tbody></table><small>Clinician review list on synthetic data · {item.rule_version} · not a prescription</small></div>)}</div>)}</div><form onSubmit={send}><input value={text} onChange={(event) => setText(event.target.value)} placeholder="Try: list T2DM patients with ASCVD or eGFR <60 not yet on SGLT2-i · remind SYN-DM-001 · verify integrity"/><button className="primary" disabled={busy}>{busy ? "Working…" : "Send"}</button></form></div></section>; }
+function GuidelineReview({ patients, token }: { patients: RecordValue[], token: string }) {
+  const [patient, setPatient] = useState(""); const [report, setReport] = useState<RecordValue | null>(null); const [selected, setSelected] = useState<string[]>([]); const [message, setMessage] = useState(""); const [busy, setBusy] = useState(false);
+  const run = async () => { if (!patient) return; try { setBusy(true); const next = await api(`/mdt/${patient}/review`, token, { method: "POST" }); setReport(next); setSelected([]); setMessage(""); } finally { setBusy(false); } };
+  const options = report?.report.members[2].considerations.filter((item: RecordValue) => item.pathway !== "clinician_review_required") || [];
+  const attest = async () => { if (!report) return; const next = await api(`/mdt/reviews/${report.id}/attest`, token, { method: "POST", body: JSON.stringify({ selected_pathways: selected }) }); setReport(next); setMessage("Attestation recorded. No referral was created."); };
+  return <section className="grid-sidebar">
+    <Card title="Diabetes MDT review">
+      <label className="field">Patient<select value={patient} onChange={(event) => setPatient(event.target.value)}><option value="">Select a patient</option>{patients.map((item) => <option value={item.id} key={item.id}>{item.reference} · {item.care_setting}</option>)}</select></label>
+      <button className="primary wide" disabled={!patient || busy} onClick={run}>{busy ? "Generating…" : "Generate review brief"}</button>
+    </Card>
+    <Card title="Review brief" actions={report ? <Badge tone={report.clinician_attested_at ? "success" : "warning"}>{report.clinician_attested_at ? "Attested" : "Awaiting attestation"}</Badge> : undefined}>
+      {report ? <div className="mdt-report">
+        {report.report.members.map((member: RecordValue) => <article key={member.member}>
+          <h4>{member.member}</h4><p className="body-text">{/^[a-z_]+$/.test(member.finding || "") ? human(member.finding) : member.finding || member.boundary}</p>
+          {member.considerations?.map((item: RecordValue) => <div className="consideration" key={item.pathway}><b>{human(item.pathway)}</b><span>{item.rationale}</span></div>)}
+        </article>)}
+        <div className="card-section flush-x"><h4>Draft review plan</h4><p className="body-text">{report.report.draft_clinician_review_plan.join(" ")}</p></div>
+        {options.length > 0 && !report.clinician_attested_at && <div className="attestation"><h4>Clinician attestation</h4>{options.map((item: RecordValue) => <label key={item.pathway} className="check"><input type="checkbox" checked={selected.includes(item.pathway)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, item.pathway] : current.filter((pathway) => pathway !== item.pathway))} />{human(item.pathway)}</label>)}<button className="primary" disabled={!selected.length} onClick={attest}>Record attestation</button></div>}
+        {message && <div className="success">{message}</div>}
+      </div> : <Empty title="No brief generated" text="Select a patient to generate a structured review brief." />}
+    </Card>
+  </section>;
+}
 
-function Regional({ token }: { token: string }) { const [data, setData] = useState<RecordValue | null>(null); const [error, setError] = useState(""); const load = async () => { try { setError(""); setData(await api("/research/regional", token)); } catch (err: any) { setError(err.message); } }; return <Panel title="Authorised regional surveillance" action="Fixed aggregate query only"><p className="muted">Unique eligible synthetic patients are the denominator. This is not prevalence or incidence.</p><button className="primary" onClick={load}>Request authorised aggregate</button>{error && <div className="error">{error}</div>}{data && <div className="districts">{data.rows.map((row: RecordValue) => <article key={row.district}><b>{row.district}</b><strong>{row.suppressed ? "Suppressed" : `${row.anomaly_rate_among_monitored_patients}%`}</strong><small>{row.eligible_patients} eligible synthetic patients</small></article>)}</div>}</Panel>; }
+const AGENT_PROMPTS = ["Email patients with open alerts", "Remind SYN-DM-001", "Verify integrity", "SGLT2 care gaps"];
+const SAFETY_NOTE = "Synthetic data — demonstration only. Supports clinician review; does not diagnose, prescribe, triage or submit referrals.";
 
-function Ledger({ token, isAdministrator }: { token: string, isAdministrator: boolean }) { const [batches, setBatches] = useState<RecordValue[]>([]); const [result, setResult] = useState<RecordValue | null>(null); const [notice, setNotice] = useState(""); const [error, setError] = useState(""); const load = async () => { try { setBatches(await api("/ledger", token)); } catch (err: any) { setError(err.message); } }; useEffect(() => { load(); }, []); const verify = async (id: string) => { try { setResult(await api(`/ledger/${id}/verify`, token, { method: "POST" })); } catch (err: any) { setError(err.message); } }; const adminAction = async (path: string) => { try { setError(""); const response = await api(path, token, { method: "POST" }); setNotice(response.message || response.status || "Demo action recorded."); await load(); } catch (err: any) { setError(err.message); } }; return <Panel title="Integrity Ledger" action="Commitments only; raw records stay off-chain">{error && <div className="error">{error}</div>}{notice && <div className="success">{notice}</div>}{batches.map((batch) => <article className="ledger-row" key={batch.id}><div><b>Batch {batch.id.slice(0, 8)}</b><p>{batch.commitment.slice(0, 24)}…</p></div><span className="status-tag">{batch.receipt_status}</span><button className="secondary" onClick={() => verify(batch.id)}>Verify</button>{isAdministrator && <button className="link-button" onClick={() => adminAction(`/ledger/${batch.id}/anchor`)}>Anchor to configured chain</button>}{isAdministrator && <button className="link-button" onClick={() => adminAction(`/admin/tamper/${batch.id}`)}>Run tamper demo</button>}{isAdministrator && <button className="link-button" onClick={() => adminAction(`/admin/restore/${batch.id}`)}>Restore demo source</button>}</article>)}{isAdministrator && <div className="demo-controls"><b>Controlled synthetic test</b><p>Inject one labelled abnormal demo observation, then use the normal scan pipeline.</p><button className="secondary" onClick={() => adminAction("/admin/inject-abnormal")}>Inject synthetic evidence</button></div>}{result && <pre className="verification">{JSON.stringify(result, null, 2)}</pre>}</Panel>; }
+function CareGapTable({ item }: { item: RecordValue }) {
+  const rows: RecordValue[] = item.records || [];
+  return <div className="care-gap-table">
+    {rows.length ? <table className="table compact"><thead><tr><th>Patient</th><th>Hospital</th><th>Criterion met</th><th>Review state</th></tr></thead><tbody>
+      {rows.map((row) => <tr key={row.patient_reference}><td className="strong">{row.patient_reference}</td><td>{row.organisation}</td><td>{(row.criteria as string[] || []).join(" + ") || "N/A"}</td><td><Badge tone={row.state === "review_candidate" ? "warning" : "neutral"}>{human(row.state)}</Badge></td></tr>)}
+    </tbody></table> : <p className="muted-text">No matching records.</p>}
+    <small>Clinician review list · {item.rule_version} · not a prescription</small>
+  </div>;
+}
+
+function AgentConsole({ token }: { token: string }) {
+  const [messages, setMessages] = useState<RecordValue[]>([{ role: "assistant", content: "Hello. I can run an evidence review, verify source integrity, prepare a regional analysis, draft patient reminders for your approval, or list T2DM records with ASCVD or eGFR < 60 and no SGLT2-inhibitor entry for clinician review." }]);
+  const [text, setText] = useState(""); const [conversation, setConversation] = useState<string | undefined>(); const [busy, setBusy] = useState(false);
+  const send = async (event?: FormEvent, preset?: string) => {
+    event?.preventDefault(); const outgoing = (preset ?? text).trim(); if (!outgoing) return;
+    setText(""); setMessages((items) => [...items, { role: "user", content: outgoing }]); setBusy(true);
+    try { const reply = await api("/agent/chat", token, { method: "POST", body: JSON.stringify({ content: outgoing, conversation_id: conversation }) }); setConversation(reply.conversation_id); setMessages((items) => [...items, { role: "assistant", content: reply.message, tool_events: reply.tool_events }]); }
+    catch (err: any) { setMessages((items) => [...items, { role: "assistant", content: `I could not complete that request. ${err.message}` }]); }
+    finally { setBusy(false); }
+  };
+  return <section className="agent-layout">
+    <Card className="agent-profile">
+      <video className="agent-avatar" src={goolaLoop} autoPlay loop muted playsInline aria-label="Goola" />
+      <h2>Goola Agent</h2>
+      <p className="muted-text">Role-scoped and fully audited.</p>
+      <div className="prompt-list"><h4>Suggested</h4>{AGENT_PROMPTS.map((prompt) => <button key={prompt} className="prompt" disabled={busy} onClick={() => send(undefined, prompt)}>{prompt}</button>)}</div>
+    </Card>
+    <Card className="chat" flush>
+      <div className="messages">{messages.map((message, index) => <div key={index} className={`message ${message.role}`}>
+        {message.role !== "user" && <img src={goolaIcon} alt="" className="message-avatar" />}
+        <div className="bubble"><p>{message.content}</p>{message.tool_events?.length ? <span className="task-chip"><Check size={12} />Task queued: {message.tool_events.map((item: RecordValue) => human(item.type)).join(", ")}</span> : null}{message.tool_events?.filter((item: RecordValue) => item.type === "sglt2_care_gap").map((item: RecordValue, eventIndex: number) => <CareGapTable key={eventIndex} item={item} />)}</div>
+      </div>)}{busy && <div className="message assistant"><img src={goolaIcon} alt="" className="message-avatar" /><div className="bubble typing"><i /><i /><i /></div></div>}</div>
+      <form onSubmit={send}><input value={text} onChange={(event) => setText(event.target.value)} placeholder="Message Goola" /><button className="primary" disabled={busy || !text.trim()} aria-label="Send"><Send size={15} /></button></form>
+    </Card>
+  </section>;
+}
+
+function Regional({ token }: { token: string }) {
+  const [data, setData] = useState<RecordValue | null>(null); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
+  const load = async () => { try { setBusy(true); setError(""); setData(await api("/research/regional", token)); } catch (err: any) { setError(err.message); } finally { setBusy(false); } };
+  return <Card title="District aggregates" actions={<button className="primary" disabled={busy} onClick={load}>{busy ? "Requesting…" : "Request aggregate"}</button>}>
+    {error && <div className="error">{error}</div>}
+    {data ? <div className="tile-grid">{data.rows.map((row: RecordValue) => <article className="tile" key={row.district}><span>{row.district}</span><strong>{row.suppressed ? "Suppressed" : `${row.anomaly_rate_among_monitored_patients}%`}</strong><small>{row.eligible_patients} eligible patients</small></article>)}</div>
+      : !error && <Empty title="No aggregate requested" text="Aggregates are released only under an active research grant." />}
+  </Card>;
+}
+
+function Ledger({ token, isAdministrator }: { token: string, isAdministrator: boolean }) {
+  const [batches, setBatches] = useState<RecordValue[]>([]); const [result, setResult] = useState<RecordValue | null>(null); const [notice, setNotice] = useState(""); const [error, setError] = useState("");
+  const load = async () => { try { setBatches(await api("/ledger", token)); } catch (err: any) { setError(err.message); } };
+  useEffect(() => { load(); }, []);
+  const verify = async (id: string) => { try { setError(""); setNotice(""); setResult(await api(`/ledger/${id}/verify`, token, { method: "POST" })); } catch (err: any) { setError(err.message); } };
+  const adminAction = async (path: string) => { try { setError(""); setResult(null); const response = await api(path, token, { method: "POST" }); setNotice(response.message || human(response.status) || "Action recorded."); await load(); } catch (err: any) { setError(err.message); } };
+  return <div className="stack-lg">
+    <Card title="Source batches" flush>
+      {error && <div className="error inset">{error}</div>}{notice && <div className="success inset">{notice}</div>}
+      <table className="table"><thead><tr><th>Batch</th><th>Commitment</th><th>Status</th><th /></tr></thead><tbody>{batches.map((batch) => <tr key={batch.id}>
+        <td className="strong">{batch.id.slice(0, 8)}</td><td><code>{batch.commitment.slice(0, 32)}…</code></td><td><Badge tone={toneFor(batch.receipt_status)}>{human(batch.receipt_status)}</Badge></td>
+        <td className="row-actions"><button className="secondary small" onClick={() => verify(batch.id)}>Verify</button>{isAdministrator && <><button className="ghost small" onClick={() => adminAction(`/ledger/${batch.id}/anchor`)}>Anchor</button><button className="ghost small" onClick={() => adminAction(`/admin/tamper/${batch.id}`)}>Tamper test</button><button className="ghost small" onClick={() => adminAction(`/admin/restore/${batch.id}`)}>Restore</button></>}</td>
+      </tr>)}</tbody></table>
+      {result && <div className="card-section"><h4>Verification result</h4><div className="kv-grid">
+        <p className="kv"><span>Local commitment</span><Badge tone={result.local_match ? "success" : "danger"}>{result.local_match ? "Match" : "Mismatch"}</Badge></p>
+        <p className="kv"><span>On-chain record</span><Badge tone={result.on_chain_match ? "success" : "neutral"}>{result.on_chain_match ? "Match" : human(result.chain_status)}</Badge></p>
+        <p className="kv"><span>Recorded</span><code>{String(result.recorded_commitment).slice(0, 24)}…</code></p>
+        <p className="kv"><span>Recomputed</span><code>{String(result.local_commitment).slice(0, 24)}…</code></p>
+      </div></div>}
+    </Card>
+    {isAdministrator && <Card title="Controlled test" actions={<button className="secondary" onClick={() => adminAction("/admin/inject-abnormal")}>Inject test observation</button>}><p className="body-text">Adds one labelled abnormal observation for the next scan.</p></Card>}
+  </div>;
+}
 
 function Governance({ token }: { token: string }) {
   const [data, setData] = useState<RecordValue | null>(null);
@@ -137,24 +367,78 @@ function Governance({ token }: { token: string }) {
   const llm: RecordValue = data?.llm_profile || {};
   const review: RecordValue | null = data?.latest_review || null;
   const mcp: RecordValue = data?.live_evidence?.mcp_activity || {};
-  return <section className="governance-layout">
-    <section className="governance-intro"><div><p className="eyebrow">AI GOVERNANCE LIFECYCLE</p><h2>Evidence-backed controls for a future LLM-assisted system.</h2><p>{data?.framework?.claim || "Loading framework status…"}</p></div><span className="governance-status planned">LLM {llm.integration_status || "checking"}</span></section>
+  if (error && !data) return <div className="error">{error}</div>;
+  if (!data) return <div className="skeleton-grid"><i /><i /><i /><i /></div>;
+  return <div className="stack-lg">
     {error && <div className="error">{error}</div>}
-    {!data ? <div className="loading">Loading CAIO governance evidence…</div> : <>
-      <section className="governance-metric-grid"><GovMetric label="Framework" value={data.framework.primary} detail={data.framework.lifecycle_companion}/><GovMetric label="LLM runtime" value={data.live_evidence.llm_runtime.status} detail="No provider or model connected"/><GovMetric label="Review cycle" value={`${data.review_interval_days} days`} detail={review ? `Next due ${governanceTime(review.next_review_due)}` : "Governance review required"}/><GovMetric label="Observed MCP agents" value={`${mcp.observed_agents_last_five_minutes ?? 0}`} detail="Approved keys active in last 5 minutes"/></section>
-      <section className="governance-section"><div className="governance-section-heading"><div><p className="eyebrow">PLAN · DO · CHECK · ACT</p><h3>Lifecycle control evidence</h3></div><p>Statuses describe this MVP’s actual controls—not certification.</p></div><div className="lifecycle-grid">{lifecycle.map((stage) => <article className="lifecycle-card" key={stage.id}><div className="lifecycle-card-heading"><span className="governance-phase">{stage.phase}</span><span className={`governance-status ${stage.status}`}>{stage.status}</span></div><h4>{stage.name}</h4><p>{stage.summary}</p><dl>{stage.evidence.map((item: RecordValue) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl></article>)}</div></section>
-      <section className="governance-two-column"><article className="governance-card llm-profile"><div className="governance-section-heading"><div><p className="eyebrow">LLM AGENT PROFILE</p><h3>{llm.component_name}</h3></div><span className="governance-status planned">{llm.integration_status} / not configured</span></div><p className="governance-muted">The future LLM may assist with authorised synthetic evidence and role-scoped tasks. Deterministic rules remain the clinical trigger.</p><GovernanceList title="Permitted inputs" items={llm.permitted_inputs}/><GovernanceList title="Prohibited inputs and actions" items={llm.prohibited_inputs}/><GovernanceList title="Required safeguards" items={llm.required_controls}/><div className="activation-note"><b>Before activation</b><span>{llm.activation_requirements?.join(" ")}</span></div></article><article className="governance-card"><div className="governance-section-heading"><div><p className="eyebrow">RISK & CONTROL REGISTER</p><h3>Known MVP risks</h3></div></div><div className="risk-list">{data.risk_controls.map((item: RecordValue) => <article key={item.id}><div><span className={`governance-status ${item.status}`}>{item.status}</span><h4>{item.risk}</h4></div><ul>{item.controls.map((control: string) => <li key={control}>{control}</li>)}</ul></article>)}</div></article></section>
-      <section className="governance-two-column"><article className="governance-card"><div className="governance-section-heading"><div><p className="eyebrow">LIVE LOCAL EVIDENCE</p><h3>Operational state</h3></div></div><dl className="live-evidence"><div><dt>Latest scan</dt><dd>{data.live_evidence.latest_scan?.status || "not run"}</dd></div><div><dt>Source integrity</dt><dd>{data.live_evidence.source_batch.receipt_status}</dd></div><div><dt>Scheduler</dt><dd>{data.live_evidence.scheduler.enabled ? data.live_evidence.scheduler.mode || "enabled" : "manual / disabled"} · {data.live_evidence.scheduler.timezone}</dd></div><div><dt>Recent audit events</dt><dd>{data.live_evidence.recent_audit_events.length}</dd></div></dl><div className="audit-mini-list">{data.live_evidence.recent_audit_events.map((item: RecordValue, index: number) => <p key={`${item.event_type}-${index}`}><b>{item.event_type}</b><span>{governanceTime(item.created_at)}</span></p>)}</div></article><article className="governance-card governance-review"><div className="governance-section-heading"><div><p className="eyebrow">CONTINUAL IMPROVEMENT</p><h3>CAIO governance review</h3></div><span className={`governance-status ${review?.status === "overdue" ? "partial" : "implemented"}`}>{review?.status || "review required"}</span></div><p className="governance-muted">Record an evidence snapshot every 30 days. This attestation is an audit record, not a certification.</p>{review && <div className="review-summary"><b>Last reviewed by {review.reviewed_by}</b><span>{governanceTime(review.reviewed_at)} · next due {governanceTime(review.next_review_due)}</span>{review.note && <p>{review.note}</p>}</div>}<form onSubmit={recordReview}><label>Optional review note<textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} placeholder="Record a concise governance observation or follow-up."/></label><button className="primary" disabled={busy}>{busy ? "Recording…" : "Record governance review"}</button></form></article></section>
-      <section className="governance-card mcp-activity-card"><div className="governance-section-heading"><div><p className="eyebrow">EXTERNAL AGENT CONNECTIONS</p><h3>Protected MCP activity</h3></div><span className="governance-status implemented">read-only</span></div><p className="governance-muted">{mcp.definition}</p><dl className="live-evidence"><div><dt>Observed approved agents · 5 min</dt><dd>{mcp.observed_agents_last_five_minutes ?? 0}</dd></div><div><dt>Active simulated sessions</dt><dd>{mcp.active_simulated_sessions ?? 0}</dd></div><div><dt>Active / revoked / expired keys</dt><dd>{mcp.active_keys ?? 0} / {mcp.revoked_keys ?? 0} / {mcp.expired_keys ?? 0}</dd></div><div><dt>Allowed / denied calls · 24 hr</dt><dd>{mcp.allowed_calls_last_24_hours ?? 0} / {mcp.denied_calls_last_24_hours ?? 0}</dd></div></dl><p className="governance-muted">{mcp.simulation_definition}</p><button className="secondary" disabled={simulationBusy} onClick={runMcpSimulation}>{simulationBusy ? "Starting simulation…" : "Run 5-minute MCP simulation"}</button></section>
-      <section className="governance-gaps"><p className="eyebrow">CURRENT GAPS</p><ul>{data.current_gaps.map((gap: string) => <li key={gap}>{gap}</li>)}</ul></section>
-    </>}
-  </section>;
+    <section className="stat-grid">
+      <Stat label="Framework" value={data.framework.primary} hint={data.framework.lifecycle_companion} />
+      <Stat label="LLM runtime" value={human(data.live_evidence.llm_runtime.status)} hint="No model connected" />
+      <Stat label="Review cycle" value={`${data.review_interval_days} days`} hint={review ? `Next due ${governanceTime(review.next_review_due)}` : "Review required"} />
+      <Stat label="External agents" value={mcp.observed_agents_last_five_minutes ?? 0} hint="Active in last 5 minutes" />
+    </section>
+    <Card title="Lifecycle controls" subtitle="Plan · Do · Check · Act">
+      <div className="lifecycle-grid">{lifecycle.map((stage) => <article className="lifecycle-card" key={stage.id}>
+        <div className="lifecycle-head"><span className="phase">{stage.phase}</span><Badge tone={toneFor(stage.status)}>{human(stage.status)}</Badge></div>
+        <h4>{stage.name}</h4><p>{stage.summary}</p>
+        <dl>{stage.evidence.map((item: RecordValue) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>
+      </article>)}</div>
+    </Card>
+    <section className="grid-2">
+      <Card title={llm.component_name || "LLM agent profile"} actions={<Badge tone="neutral">{human(llm.integration_status)}</Badge>}>
+        <GovernanceList title="Permitted inputs" items={llm.permitted_inputs} />
+        <GovernanceList title="Prohibited inputs and actions" items={llm.prohibited_inputs} />
+        <GovernanceList title="Required safeguards" items={llm.required_controls} />
+        {llm.activation_requirements?.length ? <GovernanceList title="Before activation" items={llm.activation_requirements} /> : null}
+      </Card>
+      <Card title="Risk and control register">
+        <div className="risk-list">{data.risk_controls.map((item: RecordValue) => <article key={item.id}><div className="risk-head"><h4>{item.risk}</h4><Badge tone={toneFor(item.status)}>{human(item.status)}</Badge></div><ul>{item.controls.map((control: string) => <li key={control}>{control}</li>)}</ul></article>)}</div>
+      </Card>
+    </section>
+    <section className="grid-2">
+      <Card title="Operational evidence">
+        <div className="kv-grid">
+          <p className="kv"><span>Latest scan</span><Badge tone={toneFor(data.live_evidence.latest_scan?.status)}>{human(data.live_evidence.latest_scan?.status || "not_run")}</Badge></p>
+          <p className="kv"><span>Source integrity</span><Badge tone={toneFor(data.live_evidence.source_batch.receipt_status)}>{human(data.live_evidence.source_batch.receipt_status)}</Badge></p>
+          <p className="kv"><span>Scheduler</span><b>{data.live_evidence.scheduler.enabled ? human(data.live_evidence.scheduler.mode || "enabled") : "Manual"}</b></p>
+          <p className="kv"><span>Audit events</span><b>{data.live_evidence.recent_audit_events.length}</b></p>
+        </div>
+        {data.live_evidence.recent_audit_events.length ? <table className="table compact flush-x"><tbody>{data.live_evidence.recent_audit_events.map((item: RecordValue, index: number) => <tr key={`${item.event_type}-${index}`}><td className="strong">{human(item.event_type)}</td><td className="num muted">{governanceTime(item.created_at)}</td></tr>)}</tbody></table> : null}
+      </Card>
+      <Card title="Governance review" actions={<Badge tone={review?.status === "overdue" ? "warning" : review ? "success" : "neutral"}>{human(review?.status || "required")}</Badge>}>
+        {review && <p className="kv"><span>Last review</span><b>{review.reviewed_by} · {governanceTime(review.reviewed_at)}</b></p>}
+        {review?.note && <p className="body-text">{review.note}</p>}
+        <form onSubmit={recordReview} className="stack-sm"><label className="field">Review note<textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} rows={3} /></label><button className="primary" disabled={busy}>{busy ? "Recording…" : "Record review"}</button></form>
+      </Card>
+    </section>
+    <Card title="External agent access" actions={<button className="secondary" disabled={simulationBusy} onClick={runMcpSimulation}>{simulationBusy ? "Starting…" : "Run 5-minute simulation"}</button>}>
+      <div className="kv-grid four">
+        <p className="kv"><span>Approved agents, 5 min</span><b>{mcp.observed_agents_last_five_minutes ?? 0}</b></p>
+        <p className="kv"><span>Simulated sessions</span><b>{mcp.active_simulated_sessions ?? 0}</b></p>
+        <p className="kv"><span>Keys active · revoked · expired</span><b>{mcp.active_keys ?? 0} · {mcp.revoked_keys ?? 0} · {mcp.expired_keys ?? 0}</b></p>
+        <p className="kv"><span>Calls allowed · denied, 24 h</span><b>{mcp.allowed_calls_last_24_hours ?? 0} · {mcp.denied_calls_last_24_hours ?? 0}</b></p>
+      </div>
+    </Card>
+    {data.current_gaps?.length ? <Card title="Open gaps"><ul className="list">{data.current_gaps.map((gap: string) => <li key={gap}>{gap}</li>)}</ul></Card> : null}
+  </div>;
 }
-function GovMetric({ label, value, detail }: { label: string, value: string, detail: string }) { return <article><small>{label}</small><strong>{value}</strong><span>{detail}</span></article>; }
-function GovernanceList({ title, items = [] }: { title: string, items?: string[] }) { return <section className="governance-list"><h4>{title}</h4><ul>{items.map((item) => <li key={item}>{item}</li>)}</ul></section>; }
-function governanceTime(value?: string) { return value ? new Date(value).toLocaleString("en-MY", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kuala_Lumpur" }) : "—"; }
+function GovernanceList({ title, items = [] }: { title: string, items?: string[] }) { return <section className="gov-list"><h4>{title}</h4><ul className="list">{items.map((item) => <li key={item}>{item}</li>)}</ul></section>; }
+function governanceTime(value?: string) { return value ? new Date(value).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kuala_Lumpur" }) : "N/A"; }
 
-function Status({ token }: { token: string }) { const [state, setState] = useState<RecordValue | null>(null); useEffect(() => { api("/status", token).then(setState).catch(() => setState(null)); }, []); return <section className="status-surface" style={{ backgroundImage: `linear-gradient(100deg, rgba(5,18,27,.91), rgba(5,18,27,.42)), url(${aurora})` }}><p className="eyebrow">LOCAL SYSTEM TRANSPARENCY</p><h2>Every component reports its actual state.</h2><div className="status-grid"><StatusItem label="API" value={state?.api || "Checking"}/><StatusItem label="Goola Agent" value={state?.sentinel_agent || "Checking"}/><StatusItem label="Scheduler" value={state?.scheduler?.enabled ? "enabled" : "manual / disabled"}/><StatusItem label="Blockchain" value={state?.chain || "Checking"}/></div><p>Template summaries only. Missing integrations remain visible as unavailable rather than simulated.</p></section>; }
-function StatusItem({ label, value }: { label: string, value: string }) { return <div><small>{label}</small><strong>{value}</strong></div>; }
+function Status({ token }: { token: string }) {
+  const [state, setState] = useState<RecordValue | null>(null);
+  useEffect(() => { api("/status", token).then(setState).catch(() => setState(null)); }, []);
+  const items: [string, string, LucideIcon][] = [
+    ["API", state?.api || "checking", Server],
+    ["Goola Agent", state?.sentinel_agent || "checking", Bot],
+    ["Scheduler", state ? (state.scheduler?.enabled ? "enabled" : "manual") : "checking", Activity],
+    ["Blockchain", state?.chain || "checking", Link2],
+  ];
+  const agentLabel = (value: string) => value.startsWith("in_app") ? "In-app only" : human(value);
+  return <section className="status-grid">{items.map(([label, value, Icon]) => <Card key={label} className="status-card">
+    <div className="status-head"><span className="status-icon"><Icon size={18} /></span><span className={`status-dot tone-${toneFor(value)}`} /></div>
+    <span className="status-label">{label}</span><strong>{label === "Goola Agent" ? agentLabel(value) : human(value)}</strong>
+  </Card>)}</section>;
+}
 
 createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
