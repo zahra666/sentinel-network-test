@@ -74,7 +74,7 @@ def chat(db: Session, user: User, content: str, conversation_id: str | None = No
     events: list[dict] = []
     if text.startswith("crawl "):
         task = enqueue_task(db, user, "source_crawler", {"url": content.strip()[6:].strip()})
-        answer = "I queued an allowlisted public-source crawl. It will fetch reference material only; no clinical records leave Sentinel Network."
+        answer = "I queued an allowlisted public-source crawl. It will fetch reference material only; no clinical records leave Goola."
         events.append({"type": "source_crawler", "task_id": task.id})
     elif "integrity" in text or "blockchain" in text:
         batch = db.scalar(select(SourceBatch).order_by(SourceBatch.created_at.desc()))
@@ -88,7 +88,7 @@ def chat(db: Session, user: User, content: str, conversation_id: str | None = No
     elif "regional" in text or "district" in text:
         answer = "Regional analysis is limited to authorised, fixed aggregate queries with denominator and small-cell controls. I can hand that to the aggregate-analysis subagent after grant verification."
     else:
-        answer = "I am Sentinel Agent. I can queue an authorised evidence review, integrity verification, fixed aggregate-analysis handoff, or an administrator-approved crawl of MOH/MEMS public guidance. I can also draft patient reminder emails (try: ‘email patients with open alerts’ or ‘remind SYN-DM-001’); a staff member must approve each one before it is sent. I do not diagnose, prescribe, or access data outside your role."
+        answer = "I am Goola Agent. I can queue an authorised evidence review, integrity verification, fixed aggregate-analysis handoff, or an administrator-approved crawl of MOH/MEMS public guidance. I can also draft patient reminder emails (try: ‘email patients with open alerts’ or ‘remind SYN-DM-001’); a staff member must approve each one before it is sent. I do not diagnose, prescribe, or access data outside your role."
     db.add(AgentMessage(conversation_id=conversation.id, role="assistant", content=answer, tool_events=events))
     db.add(AuditEvent(actor_id=user.id, event_type="agent.chat", entity_type="agent_conversation", entity_id=conversation.id, detail={"tool_events": events}))
     return {"conversation_id": conversation.id, "message": answer, "tool_events": events}

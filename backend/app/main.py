@@ -29,7 +29,7 @@ from .services.route import mark_alert, route_findings
 from .services.sentinel_agent import advance_notification_workflows
 from .services.sync import sync_synthetic_records
 
-app = FastAPI(title="Sentinel Network", version="0.1.0", description="Synthetic data — demonstration only. Clinician review required.")
+app = FastAPI(title="Goola", version="0.1.0", description="Synthetic data — demonstration only. Clinician review required.")
 app.add_middleware(CORSMiddleware, allow_origins=get_settings().origins, allow_credentials=False, allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type"])
 app.include_router(mcp_access_router)
 app.include_router(live_router)
@@ -478,7 +478,7 @@ def conversation(conversation_id: str, user: User = Depends(current_user), db: S
 def sentinel_tick(user: User = Depends(require_roles("administrator")), db: Session = Depends(get_db)) -> dict:
     outcome = advance_notification_workflows(db)
     db.commit()
-    return {"agent": "Sentinel Agent", "mode": "in-app-only", **outcome}
+    return {"agent": "Goola Agent", "mode": "in-app-only", **outcome}
 
 
 @app.get("/api/status")

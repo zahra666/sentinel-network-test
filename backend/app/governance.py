@@ -20,7 +20,7 @@ REVIEW_INTERVAL_DAYS = 30
 
 LLM_PROFILE = {
     "component_id": "sentinel-agent-llm",
-    "component_name": "Sentinel Agent LLM assistance",
+    "component_name": "Goola Agent LLM assistance",
     "integration_status": "planned",
     "is_configured": False,
     "provider": "not configured",
@@ -288,7 +288,7 @@ def build_governance_dashboard(db: Session) -> dict:
             "claim": "MVP alignment demonstrator — not ISO certified or a full compliance claim.",
         },
         "system_profile": {
-            "system_name": "Sentinel Network",
+            "system_name": "Goola",
             "system_type": "Synthetic clinical decision support and research integrity MVP",
             "ai_scope": "A future LLM-assisted agent layer is in scope. No LLM provider or model is currently enabled.",
             "clinical_boundary": "No autonomous diagnosis, prescribing, triage, referral, or patient contact.",

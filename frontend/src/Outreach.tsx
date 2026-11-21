@@ -30,7 +30,7 @@ function MessageCard({ message, token, onChange, compact }: { message: RecordVal
       <span className={`outreach-status ${message.status}`}>{statusLabel[message.status] || message.status}</span>
     </header>
     {open && <div className="outreach-email">
-      <div className="outreach-meta"><span>To</span><code>{message.recipient}</code><span>Subject</span><b>{message.subject}</b><span>Drafted by</span><em>Sentinel Agent ✦</em>{message.approved_by && <><span>Approved by</span><em>{message.approved_by}</em></>}</div>
+      <div className="outreach-meta"><span>To</span><code>{message.recipient}</code><span>Subject</span><b>{message.subject}</b><span>Drafted by</span><em>Goola Agent ✦</em>{message.approved_by && <><span>Approved by</span><em>{message.approved_by}</em></>}</div>
       <pre>{message.body}</pre>
       {error && <div className="error">{error}</div>}
       {pending && <div className="outreach-actions"><button className="primary" disabled={busy} onClick={() => act("approve")}>Approve &amp; send</button><button className="link-button" disabled={busy} onClick={() => act("discard")}>Discard draft</button><small>Demo outbox: the address uses the reserved .invalid domain, so no real email leaves the system.</small></div>}
@@ -71,7 +71,7 @@ export default function OutreachPage({ token }: { token: string }) {
     try {
       setBusy(true); setError("");
       const result = await api("/outreach/drafts/open-alerts", token, { method: "POST" });
-      setNotice(`Sentinel Agent drafted ${result.drafted.length} reminder(s)${result.opted_out.length ? `, skipped ${result.opted_out.length} who opted out of email` : ""}${result.already_waiting.length ? `, ${result.already_waiting.length} already waiting` : ""}. Nothing is sent until you approve.`);
+      setNotice(`Goola Agent drafted ${result.drafted.length} reminder(s)${result.opted_out.length ? `, skipped ${result.opted_out.length} who opted out of email` : ""}${result.already_waiting.length ? `, ${result.already_waiting.length} already waiting` : ""}. Nothing is sent until you approve.`);
       await load();
     } catch (err: any) { setError(err.message); } finally { setBusy(false); }
   };
@@ -81,7 +81,7 @@ export default function OutreachPage({ token }: { token: string }) {
   return <section className="outreach-layout">
     <section className="outreach-hero">
       <div><p className="eyebrow">AGENT DRAFTS · STAFF APPROVE</p><h2>Patient reminders without the paperwork.</h2>
-        <p>Sentinel Agent writes a reminder for each patient who needs follow-up. Results are included only when the patient agreed; otherwise the email is a plain reminder. Nothing is sent until a staff member approves it.</p>
+        <p>Goola Agent writes a reminder for each patient who needs follow-up. Results are included only when the patient agreed; otherwise the email is a plain reminder. Nothing is sent until a staff member approves it.</p>
         <button className="primary" disabled={busy} onClick={batch}>✦ Draft reminders for patients with open alerts</button></div>
       <div className="outreach-counts"><div><strong>{data?.awaiting_approval ?? "—"}</strong><span>Awaiting approval</span></div><div><strong>{data?.sent ?? "—"}</strong><span>Sent (simulated)</span></div></div>
     </section>

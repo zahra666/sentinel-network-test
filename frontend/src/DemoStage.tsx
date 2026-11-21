@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import goolaIcon from "./assets/goola-icon.png";
 import LiveMonitor from "./LiveMonitor";
 import "./demo.css";
 
@@ -112,7 +113,7 @@ export default function DemoStage({ token, onExit }: { token: string, onExit: ()
 
   return <div className={`demo-stage tone-${tone}`}>
     <header className="demo-top">
-      <div className="demo-brand"><span className="brand-mark">⌁</span><b>Sentinel Network</b><span>Live ingestion → review monitor</span></div>
+      <div className="demo-brand"><img className="brand-mark brand-logo" src={goolaIcon} alt="Goola" /><b>Goola</b><span>Live ingestion → review monitor</span></div>
       <div className={`demo-phase ${tone}`}><i />{running || sim?.phase ? (sim?.phase_label || "Steady simulation") : "Ready"}</div>
       <div className="demo-meta"><span>Simulated date <b>{simDate(sim?.simulated_now)}</b></span><span>Step <b>{sim?.ticks ?? 0}</b></span></div>
       {chrome && <div className="stage-controls">

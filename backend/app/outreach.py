@@ -1,4 +1,4 @@
-"""Patient outreach: Sentinel Agent drafts reminder emails, staff approve them.
+"""Patient outreach: Goola Agent drafts reminder emails, staff approve them.
 
 Safety boundaries for the synthetic demo:
 - The agent only drafts. Nothing is "sent" until an administrator or clinician approves it.
@@ -102,7 +102,7 @@ def _compose(patient: Patient, organization: Organization | None, observations: 
         lines.append("Your doctor will explain what these results mean for you at your visit.")
     else:
         lines.append("Your results are available at your visit. They are not included here because you have not agreed to receive results by email.")
-    lines += ["", f"— {clinic} diabetes care team", "", "This reminder was drafted by Sentinel Agent and approved by a member of your care team.",
+    lines += ["", f"— {clinic} diabetes care team", "", "This reminder was drafted by Goola Agent and approved by a member of your care team.",
               "Synthetic data — demonstration only."]
     return template, subject, "\n".join(lines), included
 
