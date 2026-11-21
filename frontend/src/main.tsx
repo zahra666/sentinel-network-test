@@ -1,4 +1,4 @@
-import React, { FormEvent, useEffect, useMemo, useState } from "react";
+import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
@@ -20,6 +20,12 @@ import "./styles.css";
 
 const API = import.meta.env.VITE_API_BASE_URL || "/api";
 type RecordValue = Record<string, any>;
+type PatientTab = "renal" | "outreach" | "therapy";
+const PATIENT_TABS: { id: PatientTab, label: string }[] = [
+  { id: "renal", label: "Renal profile" },
+  { id: "outreach", label: "Outreach" },
+  { id: "therapy", label: "Glucose-lowering therapy" },
+];
 
 async function api(path: string, token?: string, options: RequestInit = {}) {
   const response = await fetch(`${API}${path}`, {
@@ -208,37 +214,72 @@ function Patients({ patients, token }: { patients: RecordValue[], token: string 
   const [renal, setRenal] = useState<RecordValue | null>(null);
   const [therapy, setTherapy] = useState<RecordValue | null>(null);
   const [cohort, setCohort] = useState<RecordValue | null>(null);
+  const [activeTab, setActiveTab] = useState<PatientTab>("renal");
+  const [patientError, setPatientError] = useState("");
+  const patientRequest = useRef(0);
   useEffect(() => { api("/treatment/summary", token).then(setTherapy).catch(() => setTherapy(null)); api("/cohort/summary", token).then(setCohort).catch(() => setCohort(null)); }, [token, patients.length]);
-  const choose = async (patient: RecordValue) => {
-    setSelected(patient); setDetail(null); setRenal(null);
-    const [record, profile] = await Promise.all([api(`/patients/${patient.id}`, token), api(`/patients/${patient.id}/renal-profile`, token).catch(() => null)]);
-    setDetail(record); setRenal(profile);
-  };
+  const choose = useCallback(async (patient: RecordValue) => {
+    const request = ++patientRequest.current;
+    setSelected(patient); setDetail(null); setRenal(null); setPatientError("");
+    try {
+      const [record, profile] = await Promise.all([api(`/patients/${patient.id}`, token), api(`/patients/${patient.id}/renal-profile`, token).catch(() => null)]);
+      if (request !== patientRequest.current) return;
+      setDetail(record); setRenal(profile);
+    } catch (err: any) { if (request === patientRequest.current) setPatientError(err.message); }
+  }, [token]);
+  useEffect(() => {
+    if (!selected && patients.length) void choose(patients.find((patient) => patient.reference === "SYN-DM-003") || patients[0]);
+  }, [choose, patients, selected]);
   const shown = useMemo(() => { const q = query.trim().toLowerCase(); return q ? patients.filter((p) => `${p.reference} ${p.care_setting} ${p.organization}`.toLowerCase().includes(q)) : patients; }, [patients, query]);
-  return <section className="master-detail">
-    <Card title="Patients" count={patients.length} flush actions={<label className="search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" aria-label="Search patients" /></label>}>
+  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    const currentIndex = PATIENT_TABS.findIndex((tab) => tab.id === activeTab);
+    const nextIndex = event.key === "ArrowRight" ? (currentIndex + 1) % PATIENT_TABS.length
+      : event.key === "ArrowLeft" ? (currentIndex + PATIENT_TABS.length - 1) % PATIENT_TABS.length
+        : event.key === "Home" ? 0 : event.key === "End" ? PATIENT_TABS.length - 1 : currentIndex;
+    if (nextIndex === currentIndex) return;
+    event.preventDefault();
+    const nextTab = PATIENT_TABS[nextIndex].id;
+    setActiveTab(nextTab);
+    requestAnimationFrame(() => document.getElementById(`patients-tab-${nextTab}`)?.focus());
+  };
+  return <div className="patients-page">
+  <section className="master-detail patients-master-detail">
+    <Card title="Patients" count={patients.length} flush className="patients-primary patients-roster" actions={<label className="search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" aria-label="Search patients" /></label>}>
       <div className="table-scroll"><table className="table selectable with-treatment"><thead><tr><th>Patient</th><th>Care setting</th><th>Age</th><th>Treatment</th><th>Scope</th></tr></thead><tbody>
         {shown.map((patient) => <tr key={patient.id} className={selected?.id === patient.id ? "selected" : ""} onClick={() => choose(patient)}>
           <td><b>{patient.reference}</b><small>{patient.organization}</small></td><td>{patient.care_setting}</td><td className="num">{patient.age_group}{patient.sex && <small title={patient.sex === "female" ? "Female" : "Male"}>{patient.sex === "female" ? "F" : "M"}</small>}</td><td><TreatmentChip treatment={patient.treatment} /></td>
           <td><Badge tone={patient.pregnancy_related ? "warning" : "neutral"}>{patient.pregnancy_related ? "Scope check" : "In scope"}</Badge></td></tr>)}
       </tbody></table></div>
     </Card>
-    <div className="detail-column">
-      {selected ? detail ? <PatientEvidence detail={detail} /> : <Card title={selected.reference}><div className="loading-line" /></Card> : <Card title="Patient record"><Empty title="Select a patient" text="Choose a profile to view results and review status." /></Card>}
-      {detail && renal && <Card title="Renal profile" subtitle="Na · K · Cl · Creatinine · Urea · Uric acid · eGFR" flush><RenalProfile profile={renal} /></Card>}
-      {detail && <Card title="Outreach"><PatientOutreach patientId={detail.id} token={token} /></Card>}
-      {cohort && <Card title="Cohort profile" subtitle={`${cohort.patients} synthetic patients · sex, hypertension and kidney function`} flush><CohortProfile profile={cohort} /></Card>}
-      {therapy && <Card title="Glucose-lowering therapy" subtitle={`${therapy.patients} synthetic patients · calibrated to Malaysia NDR 2023`} flush><TreatmentSummary summary={therapy} /></Card>}
-    </div>
-  </section>;
+    <Card title={selected?.reference || "Patient record"} subtitle={detail ? `${detail.care_setting} · ${detail.organization || ""}${detail.sex ? ` · ${detail.sex === "female" ? "Female" : "Male"}, ${detail.age_group}` : ""}${detail.body_mass_index ? ` · BMI ${detail.body_mass_index}` : ""}` : "Authorised patient detail"} actions={detail ? <Badge tone={toneFor(detail.guideline_assessment.status)}>{human(detail.guideline_assessment.status)}</Badge> : undefined} flush className="patients-primary patient-detail-card">
+      {detail ? <div className="patient-detail-body">
+        <PatientEvidence detail={detail} />
+        <div className="patient-tabs">
+          <div className="patient-tab-list" role="tablist" aria-label="Patient details">
+            {PATIENT_TABS.map((tab) => <button key={tab.id} id={`patients-tab-${tab.id}`} type="button" role="tab" aria-selected={activeTab === tab.id} aria-controls={`patients-panel-${tab.id}`} tabIndex={activeTab === tab.id ? 0 : -1} className={activeTab === tab.id ? "patient-tab active" : "patient-tab"} onClick={() => setActiveTab(tab.id)} onKeyDown={handleTabKeyDown}>{tab.label}</button>)}
+          </div>
+          <div id={`patients-panel-${activeTab}`} className="patient-tab-panel" role="tabpanel" aria-labelledby={`patients-tab-${activeTab}`} tabIndex={0}>
+            {activeTab === "renal" ? renal ? <RenalProfile profile={renal} /> : <div className="renal-empty">No renal profile results for this record.</div>
+              : activeTab === "outreach" ? <PatientOutreach patientId={detail.id} token={token} />
+                : <TherapyList treatment={detail.treatment} />}
+          </div>
+        </div>
+      </div> : selected ? patientError ? <div className="error">{patientError}</div> : <div className="loading-line" /> : <Empty title="Select a patient" text="Choose a profile to view results and review status." />}
+    </Card>
+  </section>
+  {(cohort || therapy) && <section className="patient-support-grid">
+    {cohort && <Card title="Cohort profile" subtitle={`${cohort.patients} synthetic patients · sex, hypertension and kidney function`} flush><CohortProfile profile={cohort} /></Card>}
+    {therapy && <Card title="Glucose-lowering therapy" subtitle={`${therapy.patients} synthetic patients · calibrated to Malaysia NDR 2023`} flush><TreatmentSummary summary={therapy} /></Card>}
+  </section>}
+  </div>;
 }
 
 const TEST_LABELS: Record<string, string> = { hba1c: "HbA1c", fpg: "Fasting glucose", rpg: "Random glucose", egfr: "eGFR", creatinine: "Creatinine", creatinine_molar: "Creatinine", sodium: "Sodium", potassium: "Potassium", chloride: "Chloride", urea: "Urea", urate: "Uric acid" };
 
 function PatientEvidence({ detail }: { detail: RecordValue }) {
-  const status = detail.guideline_assessment.status;
   const hba1c: number[] = detail.observations.filter((o: RecordValue) => o.code === "hba1c" && o.normalised_value != null).sort((x: RecordValue, y: RecordValue) => +new Date(x.observed_at) - +new Date(y.observed_at)).map((o: RecordValue) => o.normalised_value);
-  return <Card title={detail.reference} subtitle={`${detail.care_setting} · ${detail.organization || ""}${detail.sex ? ` · ${detail.sex === "female" ? "Female" : "Male"}, ${detail.age_group}` : ""}${detail.body_mass_index ? ` · BMI ${detail.body_mass_index}` : ""}`} actions={<>{hba1c.length > 1 && <span className="spark-wrap"><small>HbA1c</small><Sparkline values={hba1c} width={96} height={30} /></span>}<Badge tone={toneFor(status)}>{human(status)}</Badge></>} flush>
+  return <div className="patient-case-summary">
+    <div className="case-summary-head"><span>Case summary</span>{hba1c.length > 1 && <span className="spark-wrap"><small>HbA1c</small><Sparkline values={hba1c} width={96} height={30} /></span>}</div>
     <table className="table compact"><thead><tr><th>Test</th><th className="num">Result</th><th>Date</th><th>Code</th></tr></thead><tbody>
       {detail.observations.map((observation: RecordValue) => <tr key={observation.id}>
         <td className="strong">{TEST_LABELS[observation.code] || observation.coding?.display || observation.code}{observation.is_corrected && <Badge tone="info">Corrected</Badge>}</td>
@@ -247,10 +288,9 @@ function PatientEvidence({ detail }: { detail: RecordValue }) {
         <td>{observation.terminology_status !== "verified" ? <Badge tone="warning">{human(observation.terminology_status)}</Badge> : <code>{observation.coding?.code || observation.original_code || observation.code}</code>}</td>
       </tr>)}
     </tbody></table>
-    <TherapyList treatment={detail.treatment} />
     {detail.conditions?.length ? <div className="card-section"><h4>Conditions</h4>{detail.conditions.map((condition: RecordValue) => <p key={condition.id} className="kv"><span>{condition.snomed?.display || condition.source_coding?.display || "Unmapped condition"}</span><code>{condition.snomed?.code || condition.source_coding?.code}</code></p>)}</div> : null}
     {detail.guideline_assessment.considerations?.[0] && <div className="card-section"><h4>Guideline consideration</h4><p className="body-text">{detail.guideline_assessment.considerations[0]}</p></div>}
-  </Card>;
+  </div>;
 }
 
 function Alerts({ alerts, token, refresh }: { alerts: RecordValue[], token: string, refresh: () => Promise<void> }) {

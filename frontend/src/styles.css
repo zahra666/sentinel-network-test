@@ -339,6 +339,7 @@ td .badge + .badge, .strong .badge { margin-left: 8px; }
 @media (max-width: 1280px) {
   .stat-grid, .status-grid, .skeleton-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .master-detail, .grid-2, .lifecycle-grid { grid-template-columns: 1fr; }
+  .patient-support-grid { grid-template-columns: 1fr; }
   .kv-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero { grid-template-columns: 1fr; justify-items: center; text-align: center; }
   .breakdown-row { grid-template-columns: 180px 1fr 48px; text-align: left; }
@@ -359,6 +360,10 @@ td .badge + .badge, .strong .badge { margin-left: 8px; }
   .stat-grid, .status-grid, .tile-grid, .kv-grid { grid-template-columns: 1fr; }
   .env-badge { display: none; }
   .topbar h1 { font-size: 30px; }
+  .patients-primary { height: clamp(420px, calc(100vh - 210px), 680px); }
+  .patient-tab-list { padding: 0 10px; }
+  .patient-tab { padding-right: 9px; padding-left: 9px; font-size: 11px; }
+  .patient-tab-panel { padding: 14px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
@@ -369,5 +374,28 @@ td .badge + .badge, .strong .badge { margin-left: 8px; }
 .care-gap-table small { display: block; padding: 8px 12px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .care-gap-table .muted-text { padding: 10px 12px; margin: 0; }
 .message.assistant .bubble:has(.care-gap-table) { max-width: 100%; }
+/* Patients workspace: matched-height roster and scrollable patient detail. */
+.patients-page { display: grid; gap: 20px; }
+.master-detail.patients-master-detail { align-items: stretch; }
+.patients-primary { height: clamp(460px, calc(100vh - 250px), 760px); min-height: 0; display: flex; flex-direction: column; }
+.patients-primary > .card-body { flex: 1; min-height: 0; overflow: hidden; }
+.patients-roster > .card-body { display: flex; flex-direction: column; }
+.patients-roster .table-scroll { flex: 1; height: auto; max-height: none; min-height: 0; }
+.patient-detail-card > .card-body { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.patient-detail-body { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.patient-case-summary { flex: 0 1 44%; min-height: 0; overflow: auto; border-bottom: 1px solid var(--border); }
+.case-summary-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; min-height: 42px; padding: 8px 22px; border-bottom: 1px solid var(--border); background: var(--surface); color: var(--muted); font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; }
+.case-summary-head .spark-wrap { color: var(--text); font-family: inherit; letter-spacing: normal; }
+.case-summary-head .spark-wrap small { font-size: 9px; }
+.patient-tabs { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.patient-tab-list { position: relative; z-index: 2; display: flex; flex: none; gap: 4px; overflow-x: auto; padding: 0 18px; border-bottom: 1px solid var(--border); background: var(--surface); scrollbar-width: thin; }
+.patient-tab { flex: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 13px 12px 11px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.patient-tab:hover { color: var(--text); }
+.patient-tab.active { border-bottom-color: var(--red); color: var(--text); }
+.patient-tab:focus-visible { outline: 2px solid var(--red); outline-offset: -3px; }
+.patient-tab-panel { flex: 1; min-height: 0; overflow: auto; padding: 18px 22px; overscroll-behavior: contain; }
+.patient-tab-panel > .card-section { border: 0; padding: 0; }
+.patient-tab-panel .renal { min-width: 0; }
+.patient-support-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 /* Required on every screen by MIT-agents.md */
 .safety-note { margin: 8px 0 0; font-family: var(--mono); font-size: 11px; letter-spacing: .02em; color: var(--subtle); text-align: center; }
