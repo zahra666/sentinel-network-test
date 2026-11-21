@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .cohort import cohort_profile
 from .chain import verify_batch
 from .care_gap import care_gaps_for_user
 from .outreach import draft_for_open_alerts, draft_message, find_reference
@@ -84,6 +85,8 @@ def chat(db: Session, user: User, content: str, conversation_id: str | None = No
         events.append({"type": "integrity_verifier", "task_id": task.id})
     elif any(word in text for word in ("email", "e-mail", "remind", "message patient", "contact patient")):
         answer, events = _draft_reminders(db, user, content)
+    elif _is_hypertension_question(text):
+        answer, events = _hypertension_count(db, user)
     elif _is_sglt2_review(text):
         answer, events = _sglt2_review(db, user)
     elif "patient" in text or "evidence" in text:
@@ -91,10 +94,33 @@ def chat(db: Session, user: User, content: str, conversation_id: str | None = No
     elif "regional" in text or "district" in text:
         answer = "Regional analysis is limited to authorised, fixed aggregate queries with denominator and small-cell controls. I can hand that to the aggregate-analysis subagent after grant verification."
     else:
-        answer = "I am Goola Agent. I can queue an authorised evidence review, integrity verification, fixed aggregate-analysis handoff, or an administrator-approved crawl of MOH/MEMS public guidance. I can list T2DM records with ASCVD or eGFR < 60 and no active SGLT2-inhibitor entry for clinician medication review (try: ‘list T2DM patients with ASCVD or eGFR <60 not yet on SGLT2-i’). I can also draft patient reminder emails (try: ‘email patients with open alerts’ or ‘remind SYN-DM-001’); a staff member must approve each one before it is sent. I do not diagnose, prescribe, or access data outside your role."
+        answer = "I am Goola Agent. I can queue an authorised evidence review, integrity verification, fixed aggregate-analysis handoff, or an administrator-approved crawl of MOH/MEMS public guidance. I can list T2DM records with ASCVD or eGFR < 60 and no active SGLT2-inhibitor entry for clinician medication review (try: ‘list T2DM patients with ASCVD or eGFR <60 not yet on SGLT2-i’). I can also draft patient reminder emails (try: ‘email patients with open alerts’ or ‘remind SYN-DM-001’); a staff member must approve each one before it is sent. I can count records with a hypertension diagnosis (try: ‘how many patients have high blood pressure?’). I do not diagnose, prescribe, or access data outside your role."
     db.add(AgentMessage(conversation_id=conversation.id, role="assistant", content=answer, tool_events=events))
     db.add(AuditEvent(actor_id=user.id, event_type="agent.chat", entity_type="agent_conversation", entity_id=conversation.id, detail={"tool_events": events}))
     return {"conversation_id": conversation.id, "message": answer, "tool_events": events}
+
+
+def _is_hypertension_question(text: str) -> bool:
+    words = set(text.replace("?", " ").replace(",", " ").split())
+    return "blood pressure" in text or "hypertensi" in text or "高血压" in text or bool(words & {"bp", "htn"})
+
+
+def _hypertension_count(db: Session, user: User) -> tuple[str, list[dict]]:
+    """Aggregate count only (no identifiers), bounded to the caller's organisation for clinicians."""
+    if user.role not in {"administrator", "clinician"}:
+        return "Only administrators and clinicians can view cohort counts.", []
+    query = select(Patient)
+    if user.role == "clinician":
+        query = query.where(Patient.organization_id == user.organization_id)
+    profile = cohort_profile(list(db.scalars(query).all()))
+    htn = profile["hypertension"]
+    scope = "your hospital" if user.role == "clinician" else "all three hospitals"
+    by_sex = htn["by_sex"]
+    answer = (f"{htn['count']} of {profile['patients']} synthetic T2DM records in {scope} ({htn['pct']}%) have an active, verified "
+              f"hypertension diagnosis (SNOMED CT 38341003): {by_sex.get('female', 0)} female and {by_sex.get('male', 0)} male. "
+              f"For reference, the Malaysian National Diabetes Registry 2023 audit reports hypertension in {htn['ndr_2023_pct']}% of people with T2DM. "
+              "This is a count of recorded diagnoses, not of current blood-pressure control.")
+    return answer, [{"type": "cohort_count", "measure": "hypertension", "count": htn["count"], "denominator": profile["patients"]}]
 
 
 def _is_sglt2_review(text: str) -> bool:

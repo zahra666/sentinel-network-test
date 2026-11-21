@@ -9,10 +9,10 @@ from .config import get_settings
 from .db import SessionLocal, initialise_database
 from .models import AuditEvent, Condition, MedicationStatement, Observation, Organization, Patient, ResearchGrant, SourceBatch, User
 from .security import hash_password, verify_password
-from .cohort import CohortMember, assign_sex, plan_egfr
+from .cohort import CohortMember, assign_sex, plan_egfr, plan_hypertension
 from .renal_profile import seed_codes, synthetic_renal_panels
 from .treatment import Profile, Regimen, plan_treatment
-from .terminology import ATC_MEDICATIONS, ATC_SYSTEM, LOINC_SYSTEM, LOINC_VERSION, SNOMED_CONDITIONS, SNOMED_SYSTEM, TerminologyError, map_measurement
+from .terminology import HYPERTENSION_SNOMED_CODE, ATC_MEDICATIONS, ATC_SYSTEM, LOINC_SYSTEM, LOINC_VERSION, SNOMED_CONDITIONS, SNOMED_SYSTEM, TerminologyError, map_measurement
 
 PASSWORD = "12345"
 DEMO_EMAILS = (
@@ -64,13 +64,23 @@ def abnormal_glycaemia(index: int) -> bool:
     return index % 11 == 0 or index % 100 in {1, 17, 45}
 
 
+def cohort_members(attributes: list[dict]) -> list[CohortMember]:
+    return [CohortMember(index=row["index"], age_group=row["age_group"], care_setting=row["care_setting"],
+                         pregnancy_related=row["pregnancy_related"], has_ascvd=synthetic_ascvd_code(row["index"]) is not None,
+                         abnormal_glycaemia=abnormal_glycaemia(row["index"])) for row in attributes]
+
+
 def cohort_plan(total: int) -> tuple[list[dict], dict[int, str], dict[int, float | None]]:
     """Attributes, NDR-calibrated sex and eGFR (None = creatinine not tested) for `total` profiles."""
     attributes = synthetic_patient_attributes(total)
-    members = [CohortMember(index=row["index"], age_group=row["age_group"], care_setting=row["care_setting"],
-                            pregnancy_related=row["pregnancy_related"], has_ascvd=synthetic_ascvd_code(row["index"]) is not None,
-                            abnormal_glycaemia=abnormal_glycaemia(row["index"])) for row in attributes]
+    members = cohort_members(attributes)
     return attributes, assign_sex(members), plan_egfr(members)
+
+
+def hypertension_plan(total: int) -> set[int]:
+    """Profile indices with a hypertension diagnosis (NDR 2023: 81.10 %)."""
+    attributes, _, egfr_plan = cohort_plan(total)
+    return plan_hypertension(cohort_members(attributes), egfr_plan)
 
 
 def synthetic_ascvd_code(index: int) -> str | None:
@@ -188,6 +198,7 @@ def seed() -> None:
         db.add(ResearchGrant(user_id=users[5].id, organization_id=None, purpose="Synthetic regional surveillance demonstration", scope="fixed-district-rate", expires_at=ANCHOR + timedelta(days=365)))
 
         attributes, sex_plan, egfr_plan = cohort_plan(get_settings().seed_patient_count)
+        hypertensive = plan_hypertension(cohort_members(attributes), egfr_plan)
         patients: list[Patient] = []
         for row in attributes:
             patient = Patient(reference=f"SYN-DM-{row['index']:03d}", organization_id=organisations[row["org_index"]].id, care_setting=row["care_setting"],
@@ -240,6 +251,17 @@ def seed() -> None:
                     terminology_status="verified", recorded_at=ANCHOR - timedelta(days=400),
                     provenance={"source": "deterministic synthetic seed", "synthetic_only": True, "multimorbidity": "ascvd"},
                 ))
+            if index in hypertensive:
+                conditions.append(Condition(
+                    patient_id=patient.id, source_id=f"COND-{index:03d}-HTN", version=1,
+                    clinical_status="active", verification_status="confirmed",
+                    source_coding_system=SNOMED_SYSTEM, source_code=HYPERTENSION_SNOMED_CODE,
+                    source_display=SNOMED_CONDITIONS[HYPERTENSION_SNOMED_CODE]["display"],
+                    snomed_code=HYPERTENSION_SNOMED_CODE, snomed_display=SNOMED_CONDITIONS[HYPERTENSION_SNOMED_CODE]["display"],
+                    terminology_status="verified", recorded_at=ANCHOR - timedelta(days=700),
+                    provenance={"source": "deterministic synthetic seed", "synthetic_only": True, "multimorbidity": "hypertension",
+                                "calibration": "NDR Report 2023 Table 5 (81.10 %)"},
+                ))
             medications.extend(synthetic_medications(index, patient.id, egfr, ascvd_code is not None, treatment_plan[index]))
             for sequence, (code, value, item_unit, days_ago) in enumerate(values, start=1):
                 loinc_code, local_code = {
@@ -284,7 +306,7 @@ def seed() -> None:
         batch = build_source_batch(observations)
         db.add(batch)
         db.flush()
-        db.add(AuditEvent(actor_id=users[0].id, event_type="seed.completed", entity_type="source_batch", entity_id=batch.id, detail={"patients": len(patients), "observations": len(observations), "conditions": len(conditions), "medication_statements": len(medications), "care_mix": {setting: sum(row["care_setting"] == setting for row in attributes) for setting in ("Outpatient Clinic", "Medical Ward", "Surgical Ward", "O&G Ward")}, "sex": {sex: sum(value == sex for value in sex_plan.values()) for sex in ("female", "male")}, "egfr_not_tested": sum(value is None for value in egfr_plan.values())}))
+        db.add(AuditEvent(actor_id=users[0].id, event_type="seed.completed", entity_type="source_batch", entity_id=batch.id, detail={"patients": len(patients), "observations": len(observations), "conditions": len(conditions), "medication_statements": len(medications), "care_mix": {setting: sum(row["care_setting"] == setting for row in attributes) for setting in ("Outpatient Clinic", "Medical Ward", "Surgical Ward", "O&G Ward")}, "sex": {sex: sum(value == sex for value in sex_plan.values()) for sex in ("female", "male")}, "egfr_not_tested": sum(value is None for value in egfr_plan.values()), "hypertension": len(hypertensive)}))
         db.commit()
 
 

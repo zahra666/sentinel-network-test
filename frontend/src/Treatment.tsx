@@ -66,3 +66,23 @@ export function TreatmentSummary({ summary }: { summary: RecordValue }) {
     </p>
   </div>;
 }
+
+/** Aggregate cohort profile (sex, hypertension, eGFR) next to Malaysian references. */
+export function CohortProfile({ profile }: { profile: RecordValue }) {
+  const htn = profile.hypertension, egfr = profile.egfr, sex = profile.sex;
+  const tested = profile.patients - egfr.not_tested || 1;
+  const rows: [string, string, string][] = [
+    ["Female / male", `${sex.female?.count ?? 0} / ${sex.male?.count ?? 0}`, "57.08% F"],
+    ["Hypertension", `${htn.count} (${htn.pct}%)`, `${htn.ndr_2023_pct.toFixed(2)}%`],
+    ["  · female / male", `${htn.by_sex.female ?? 0} / ${htn.by_sex.male ?? 0}`, ""],
+    ["eGFR not tested", `${egfr.not_tested} (${egfr.not_tested_pct}%)`, "9.01%"],
+    ["eGFR < 60 (of tested)", `${egfr.below_60} (${(100 * egfr.below_60 / tested).toFixed(1)}%)`, "22.4%"],
+  ];
+  return <div className="tx-summary">
+    <table className="table compact tx-table">
+      <thead><tr><th>Measure</th><th className="num">Cohort</th><th className="num">Malaysia</th></tr></thead>
+      <tbody>{rows.map(([label, value, ref]) => <tr key={label} className={label.startsWith("  ") ? "tx-sub" : ""}><td>{label.trim()}</td><td className="num"><b>{value}</b></td><td className="num">{ref}</td></tr>)}</tbody>
+    </table>
+    <p className="tx-foot">Malaysia: NDR Report 2023 (sex Table 2, hypertension Table 5, creatinine testing Table 6); eGFR &lt; 60 from the NDR 2022 audit (Sci Rep 2024). Hypertension = active, verified {htn.code}; counts recorded diagnoses, not blood-pressure control. Synthetic data.</p>
+  </div>;
+}

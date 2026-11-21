@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .treatment import cohort_summary, modality_of
+from .cohort import cohort_profile
 from .renal_profile import renal_profile
 from .care_gap import care_gaps_for_user
 from .agent import chat, enqueue_task, process_pending_tasks, process_task
@@ -192,6 +193,15 @@ def _treatment_by_patient(db: Session, patient_ids: list[str]) -> dict[str, dict
 
 def _treatment_brief(result: dict) -> dict:
     return {"modality": result["modality"], "label": result["label"], "insulin": result["insulin"], "oral_agent_count": result["oral_agent_count"]}
+
+
+@app.get("/api/cohort/summary")
+def cohort_summary_endpoint(user: User = Depends(require_roles("administrator", "clinician")), db: Session = Depends(get_db)) -> dict:
+    """Aggregate sex / hypertension / eGFR counts (clinicians: own hospital only). No patient identifiers."""
+    query = select(Patient)
+    if user.role == "clinician":
+        query = query.where(Patient.organization_id == user.organization_id)
+    return {"scope": "organisation" if user.role == "clinician" else "all_organisations", **cohort_profile(list(db.scalars(query).all()))}
 
 
 @app.get("/api/treatment/summary")

@@ -14,7 +14,7 @@ import LiveMonitor from "./LiveMonitor";
 import DemoStage from "./DemoStage";
 import OutreachPage, { PatientOutreach } from "./Outreach";
 import { RenalProfile } from "./RenalProfile";
-import { TherapyList, TreatmentChip, TreatmentSummary } from "./Treatment";
+import { CohortProfile, TherapyList, TreatmentChip, TreatmentSummary } from "./Treatment";
 import { Badge, Card, CountUp, Empty, Ring, Sparkline, STATUS_COLORS, Stat, human, toneFor } from "./ui";
 import "./styles.css";
 
@@ -207,7 +207,8 @@ function Patients({ patients, token }: { patients: RecordValue[], token: string 
   const [selected, setSelected] = useState<RecordValue | null>(null); const [detail, setDetail] = useState<RecordValue | null>(null); const [query, setQuery] = useState("");
   const [renal, setRenal] = useState<RecordValue | null>(null);
   const [therapy, setTherapy] = useState<RecordValue | null>(null);
-  useEffect(() => { api("/treatment/summary", token).then(setTherapy).catch(() => setTherapy(null)); }, [token, patients.length]);
+  const [cohort, setCohort] = useState<RecordValue | null>(null);
+  useEffect(() => { api("/treatment/summary", token).then(setTherapy).catch(() => setTherapy(null)); api("/cohort/summary", token).then(setCohort).catch(() => setCohort(null)); }, [token, patients.length]);
   const choose = async (patient: RecordValue) => {
     setSelected(patient); setDetail(null); setRenal(null);
     const [record, profile] = await Promise.all([api(`/patients/${patient.id}`, token), api(`/patients/${patient.id}/renal-profile`, token).catch(() => null)]);
@@ -226,6 +227,7 @@ function Patients({ patients, token }: { patients: RecordValue[], token: string 
       {selected ? detail ? <PatientEvidence detail={detail} /> : <Card title={selected.reference}><div className="loading-line" /></Card> : <Card title="Patient record"><Empty title="Select a patient" text="Choose a profile to view results and review status." /></Card>}
       {detail && renal && <Card title="Renal profile" subtitle="Na · K · Cl · Creatinine · Urea · Uric acid · eGFR" flush><RenalProfile profile={renal} /></Card>}
       {detail && <Card title="Outreach"><PatientOutreach patientId={detail.id} token={token} /></Card>}
+      {cohort && <Card title="Cohort profile" subtitle={`${cohort.patients} synthetic patients · sex, hypertension and kidney function`} flush><CohortProfile profile={cohort} /></Card>}
       {therapy && <Card title="Glucose-lowering therapy" subtitle={`${therapy.patients} synthetic patients · calibrated to Malaysia NDR 2023`} flush><TreatmentSummary summary={therapy} /></Card>}
     </div>
   </section>;
@@ -291,7 +293,7 @@ function GuidelineReview({ patients, token }: { patients: RecordValue[], token: 
   </section>;
 }
 
-const AGENT_PROMPTS = ["Email patients with open alerts", "Remind SYN-DM-001", "Verify integrity", "SGLT2 care gaps"];
+const AGENT_PROMPTS = ["Email patients with open alerts", "Remind SYN-DM-001", "Verify integrity", "SGLT2 care gaps", "How many patients have high blood pressure?"];
 const SAFETY_NOTE = "Synthetic data — demonstration only. Supports clinician review; does not diagnose, prescribe, triage or submit referrals.";
 
 function CareGapTable({ item }: { item: RecordValue }) {
@@ -324,7 +326,7 @@ function AgentConsole({ token }: { token: string }) {
     <Card className="chat" flush>
       <div className="messages">{messages.map((message, index) => <div key={index} className={`message ${message.role}`}>
         {message.role !== "user" && <img src={goolaIcon} alt="" className="message-avatar" />}
-        <div className="bubble"><p>{message.content}</p>{message.tool_events?.length ? <span className="task-chip"><Check size={12} />Task queued: {message.tool_events.map((item: RecordValue) => human(item.type)).join(", ")}</span> : null}{message.tool_events?.filter((item: RecordValue) => item.type === "sglt2_care_gap").map((item: RecordValue, eventIndex: number) => <CareGapTable key={eventIndex} item={item} />)}</div>
+        <div className="bubble"><p>{message.content}</p>{message.tool_events?.length ? <span className="task-chip"><Check size={12} />{message.tool_events.every((item: RecordValue) => item.type === "cohort_count") ? "Counted from records" : `Task queued: ${message.tool_events.map((item: RecordValue) => human(item.type)).join(", ")}`}</span> : null}{message.tool_events?.filter((item: RecordValue) => item.type === "sglt2_care_gap").map((item: RecordValue, eventIndex: number) => <CareGapTable key={eventIndex} item={item} />)}</div>
       </div>)}{busy && <div className="message assistant"><img src={goolaIcon} alt="" className="message-avatar" /><div className="bubble typing"><i /><i /><i /></div></div>}</div>
       <form onSubmit={send}><input value={text} onChange={(event) => setText(event.target.value)} placeholder="Message Goola" /><button className="primary" disabled={busy || !text.trim()} aria-label="Send"><Send size={15} /></button></form>
     </Card>

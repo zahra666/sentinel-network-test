@@ -24,6 +24,8 @@ import random
 from dataclasses import dataclass
 
 NDR_2023_SEX = {"female": 57.08, "male": 42.92}
+# NDR Report 2023, Table 5 (audit dataset, n = 113,903): hypertension 92,380 (81.10 %).
+NDR_2023_HYPERTENSION_PCT = 81.10
 CREATININE_TESTED_PCT = 90.99
 _ABOVE_60 = 100 - 22.4
 _UK_G1, _UK_G2 = 32.8, 50.2
@@ -40,6 +42,7 @@ SOURCES = {
     "sex": "NDR Report 2023, Table 2 (registry dataset, n=1,946,133)",
     "creatinine_tested": "NDR Report 2023, Table 6 (audit dataset, n=113,903)",
     "egfr_below_60": "NDR 2022 audit, Sci Rep 2024;14:7247 (n=80,360)",
+    "hypertension": "NDR Report 2023, Table 5 (audit dataset, n=113,903): 81.10 %",
     "g1_g2_ratio": "UK CPRD T2DM cohort, PMC6767485 (ratio only; no Malaysian G1/G2 split published)",
 }
 # Fixtures that other features rely on keep a fixed eGFR.
@@ -111,3 +114,57 @@ def egfr_category(egfr: float | None) -> str | None:
         if egfr >= low:
             return name
     return "G5"
+
+
+def plan_hypertension(members: list[CohortMember], egfr_plan: dict[int, float | None]) -> set[int]:
+    """Exactly NDR 2023 share with a hypertension diagnosis; more likely with age, ASCVD and low eGFR."""
+    target = round(len(members) * NDR_2023_HYPERTENSION_PCT / 100)
+
+    def score(m: CohortMember) -> float:
+        egfr = egfr_plan.get(m.index)
+        kidney = 0.5 if egfr is not None and egfr < 60 else 0.0
+        age = {"65+": 0.6, "45-64": 0.4}.get(m.age_group, 0.0)
+        return age + kidney + 0.4 * m.has_ascvd - 1.0 * m.pregnancy_related + 3.0 * random.Random(m.index * 92821).random()
+
+    return {m.index for m in sorted(members, key=score, reverse=True)[:target]}
+
+
+def cohort_profile(patients: list) -> dict:
+    """Counts for staff dashboards and Goola: sex, hypertension and eGFR, next to Malaysian references.
+
+    `patients` are ORM Patient rows already limited to the caller's scope. Only
+    active, verified SNOMED 38341003 conditions count as hypertension.
+    """
+    from .renal_profile import CODE_FOR_LOINC  # local import keeps this module free of ORM/renal imports at load
+
+    n = len(patients)
+    pct = (lambda count: round(100 * count / n, 1)) if n else (lambda count: 0.0)
+    hypertension = {"female": 0, "male": 0, "unknown": 0}
+    sexes = {"female": 0, "male": 0, "unknown": 0}
+    stages: dict[str, int] = {name: 0 for name, *_ in reversed(EGFR_STAGES)}
+    untested = 0
+    for patient in patients:
+        sex = patient.sex if patient.sex in {"female", "male"} else "unknown"
+        sexes[sex] += 1
+        if any(c.snomed_code == "38341003" and c.clinical_status == "active" and c.terminology_status == "verified" for c in patient.conditions):
+            hypertension[sex] += 1
+        latest = None
+        for obs in patient.observations:
+            if CODE_FOR_LOINC.get(obs.standard_code) == "egfr" and obs.terminology_status == "verified" and obs.normalised_value is not None:
+                if latest is None or obs.observed_at > latest.observed_at:
+                    latest = obs
+        if latest is None:
+            untested += 1
+        else:
+            stages[egfr_category(latest.normalised_value)] += 1
+    total_htn = sum(hypertension.values())
+    return {
+        "patients": n,
+        "sex": {key: {"count": value, "pct": pct(value)} for key, value in sexes.items() if value or key != "unknown"},
+        "hypertension": {"count": total_htn, "pct": pct(total_htn), "ndr_2023_pct": NDR_2023_HYPERTENSION_PCT,
+                         "by_sex": {key: value for key, value in hypertension.items() if value or key != "unknown"},
+                         "code": "SNOMED CT 38341003 Hypertensive disorder, systemic arterial (disorder)"},
+        "egfr": {"not_tested": untested, "not_tested_pct": pct(untested), "categories": stages,
+                 "below_60": sum(stages[k] for k in ("G3a", "G3b", "G4", "G5"))},
+        "sources": SOURCES, "synthetic_only": True,
+    }

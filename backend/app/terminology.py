@@ -146,6 +146,16 @@ SNOMED_CONDITIONS: dict[str, dict[str, str | None]] = {
         "group": "ascvd",
     },
 }
+SNOMED_CONDITIONS["38341003"] = {
+    # Verified 2026-11-21: HL7 FHIR value set (SNOMED CT International 2024-02-01)
+    # and the Nictiz SNOMED browser list 38341003 as an active disorder concept,
+    # synonyms "Hypertension" / "High blood pressure"; ICD-10 map I10.
+    "display": "Hypertensive disorder, systemic arterial (disorder)",
+    "version": None,
+    "verification_source": "SNOMED CT concept 38341003 (HL7 SANER HypertensionCOVID19RiskFactors value set, SNOMED CT Intl 2024-02; Nictiz browser)",
+    "group": "hypertension",
+}
+HYPERTENSION_SNOMED_CODE = "38341003"
 ASCVD_SNOMED_CODES = frozenset(code for code, entry in SNOMED_CONDITIONS.items() if entry.get("group") == "ascvd")
 T2DM_SNOMED_CODE = "44054006"
 
