@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .chain import verify_batch
+from .outreach import draft_for_open_alerts, draft_message, find_reference
 from .models import AgentConversation, AgentMessage, AuditEvent, DelegatedTask, Observation, Patient, SourceBatch, User
 
 ALLOWED_CRAWL_HOSTS = {"moh.gov.my", "www.moh.gov.my", "mems.my", "www.mems.my"}
@@ -80,15 +81,41 @@ def chat(db: Session, user: User, content: str, conversation_id: str | None = No
         task = enqueue_task(db, user, "integrity_verifier", {"batch_id": batch.id if batch else ""})
         answer = "I queued the integrity verifier against the current source batch. It will return commitment evidence, not a fabricated receipt."
         events.append({"type": "integrity_verifier", "task_id": task.id})
+    elif any(word in text for word in ("email", "e-mail", "remind", "message patient", "contact patient")):
+        answer, events = _draft_reminders(db, user, content)
     elif "patient" in text or "evidence" in text:
         answer = "For an evidence review, open an authorised patient record and choose ‘Delegate evidence review’. I will enforce your organisation boundary and return only rule evidence and data-quality context."
     elif "regional" in text or "district" in text:
         answer = "Regional analysis is limited to authorised, fixed aggregate queries with denominator and small-cell controls. I can hand that to the aggregate-analysis subagent after grant verification."
     else:
-        answer = "I am Sentinel Agent. I can queue an authorised evidence review, integrity verification, fixed aggregate-analysis handoff, or an administrator-approved crawl of MOH/MEMS public guidance. I do not diagnose, prescribe, contact patients, or access data outside your role."
+        answer = "I am Sentinel Agent. I can queue an authorised evidence review, integrity verification, fixed aggregate-analysis handoff, or an administrator-approved crawl of MOH/MEMS public guidance. I can also draft patient reminder emails (try: ‘email patients with open alerts’ or ‘remind SYN-DM-001’); a staff member must approve each one before it is sent. I do not diagnose, prescribe, or access data outside your role."
     db.add(AgentMessage(conversation_id=conversation.id, role="assistant", content=answer, tool_events=events))
     db.add(AuditEvent(actor_id=user.id, event_type="agent.chat", entity_type="agent_conversation", entity_id=conversation.id, detail={"tool_events": events}))
     return {"conversation_id": conversation.id, "message": answer, "tool_events": events}
+
+
+def _draft_reminders(db: Session, user: User, content: str) -> tuple[str, list[dict]]:
+    if user.role not in {"administrator", "clinician"}:
+        return "Only administrators and clinicians can ask me to draft patient reminders.", []
+    reference = find_reference(content)
+    if reference:
+        patient = db.scalar(select(Patient).where(Patient.reference == reference))
+        if not patient or (user.role == "clinician" and patient.organization_id != user.organization_id):
+            return f"I cannot find {reference} in your authorised organisation.", []
+        message = draft_message(db, user, patient)
+        if message is None:
+            return f"{reference} has opted out of email reminders, so I did not draft one.", [{"type": "outreach_skipped", "patient": reference}]
+        detail = "with their recent results (consent recorded)" if message.includes_results else "without results (no consent to share results by email)"
+        return (f"I drafted a ‘{message.template.replace('_', ' ')}’ email for {reference} {detail}. It is waiting for your approval in Patient Outreach; nothing has been sent.",
+                [{"type": "outreach_draft", "message_id": message.id, "patient": reference}])
+    result = draft_for_open_alerts(db, user)
+    parts = [f"I drafted {len(result['drafted'])} reminder email(s) for patients with open review alerts"]
+    if result["already_waiting"]:
+        parts.append(f"{len(result['already_waiting'])} already had a draft waiting")
+    if result["opted_out"]:
+        parts.append(f"{len(result['opted_out'])} opted out of email and were skipped")
+    answer = "; ".join(parts) + ". Each draft includes results only when the patient consented. Please review and approve them in Patient Outreach; nothing has been sent yet."
+    return answer, [{"type": "outreach_batch", **result}]
 
 
 def _crawl_public_source(url: str) -> dict:

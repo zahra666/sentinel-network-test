@@ -22,6 +22,7 @@ from .models import AgentMessage, Alert, AuditEvent, Condition, DelegatedTask, D
 from .mdt import run_three_member_mdt
 from .mcp_access import router as mcp_access_router
 from .live import router as live_router, start_background_runner
+from .outreach import router as outreach_router
 from .security import create_token, current_user, require_roles, verify_password
 from .services.analyse import analyse_patients
 from .services.route import mark_alert, route_findings
@@ -32,6 +33,7 @@ app = FastAPI(title="Sentinel Network", version="0.1.0", description="Synthetic 
 app.add_middleware(CORSMiddleware, allow_origins=get_settings().origins, allow_credentials=False, allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type"])
 app.include_router(mcp_access_router)
 app.include_router(live_router)
+app.include_router(outreach_router)
 
 
 class FhirR4JsonResponse(JSONResponse):

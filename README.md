@@ -60,6 +60,16 @@ outside this hackathon MVP:
 - **Demo mode** (Live Monitor → Demo mode, or `/?demo`) plays a scripted *catch-up* storyline in 14-day steps: routine follow-up → missed follow-ups (few new results arrive) → recall clinic (a backlog of results lands, a subset returns higher values, and one lab batch sends FPG in mg/dL under the molar LOINC code, which the terminology gate rejects into data-quality review) → recovery (the lab re-sends corrected version-2 results, which supersede version 1 and are re-assessed) → routine, and stops itself after 24 steps. The left pane streams the actual INSERT statements, the scan call and worked rule checks for each step.
 - A run stops automatically after `LIVE_SIMULATION_MAX_MINUTES` (default 30). Set `LIVE_SIMULATION_ENABLED=false` to disable the background runner. Cloud schema: [live monitor migration](supabase/migrations/20261120130000_add_live_monitor.sql).
 
+## Patient Outreach (agent drafts, staff approve)
+
+Sentinel Agent can draft patient reminder emails. Ask it in **Sentinel Agent** (`email patients with open alerts`, or `remind SYN-DM-001`), use **Patient Outreach → Draft reminders for patients with open alerts**, or open a patient and choose **Ask agent to draft reminder**.
+
+- **Staff approval is required.** Every draft waits in *Awaiting approval* until an administrator or clinician presses **Approve & send**; the approver is recorded in the audit trail. Clinicians see and act only on their own hospital's patients. Researchers and CAIO have no access.
+- **Consent decides the content.** Each synthetic patient has a recorded preference: no email at all, a plain reminder, or a reminder that includes their latest HbA1c/FPG. Changing consent discards any waiting draft written under the old consent.
+- **Templates only.** Drafts are deterministic templates (review appointment, repeat blood test, routine check-up) chosen from the CPG review state. They never contain a diagnosis or treatment advice.
+- **Simulated delivery.** "Sent" means moved to the demo outbox. No SMTP or messaging gateway is called, and synthetic addresses use the reserved `.invalid` domain. Real delivery would need an approved gateway, PDPA review, and a change to the repository's no-external-patient-contact rule. MCP stays read-only and has no outreach tool.
+- Cloud schema: [patient outreach migration](supabase/migrations/20261121100000_add_patient_outreach.sql).
+
 ## AI governance lifecycle MVP
 
 Administrators and the dedicated **CAIO** demo account can open **AI Governance** to review Sentinel's evidence-backed lifecycle controls. CAIO browser access is restricted to governance and system status; it has no browser clinical or administrative controls. The page maps the local MVP to ISO/IEC 42001:2023 management-system themes and ISO/IEC 5338:2023 lifecycle practices. It is an alignment demonstrator only—not ISO certification or a full compliance claim.

@@ -360,3 +360,40 @@ class LiveStatusSnapshot(Base):
     open_alerts: Mapped[dict] = mapped_column(JSON, default=dict)
     # What this step actually did: written observations, scan stage counts, state transitions.
     events: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class PatientContactConsent(Base):
+    """Recorded patient preference for reminder emails. Synthetic addresses use the reserved .invalid domain."""
+
+    __tablename__ = "patient_contact_consents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    patient_id: Mapped[str] = mapped_column(ForeignKey("patients.id"), unique=True, index=True)
+    contact_email: Mapped[str] = mapped_column(String(180))
+    email_reminders: Mapped[bool] = mapped_column(Boolean, default=True)
+    share_results: Mapped[bool] = mapped_column(Boolean, default=False)
+    recorded_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PatientMessage(Base):
+    """An agent-drafted patient reminder. Nothing leaves the system until staff approve it; delivery is a simulated outbox."""
+
+    __tablename__ = "patient_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    patient_id: Mapped[str] = mapped_column(ForeignKey("patients.id"), index=True)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    channel: Mapped[str] = mapped_column(String(24), default="email")
+    template: Mapped[str] = mapped_column(String(48))
+    recipient: Mapped[str] = mapped_column(String(180))
+    subject: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    includes_results: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(24), default="awaiting_approval", index=True)
+    drafted_by_agent: Mapped[str] = mapped_column(String(48), default="sentinel_agent")
+    requested_by: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    approved_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivery: Mapped[str] = mapped_column(String(32), default="simulated_outbox")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
