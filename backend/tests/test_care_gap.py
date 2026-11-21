@@ -21,7 +21,7 @@ from app.db import Base, get_db
 from app.main import app
 from app.models import AgentAccessKey, AuditEvent, Condition, MedicationStatement, Observation, Organization, Patient, User
 from app.security import create_token
-from app.seed import synthetic_ascvd_code, synthetic_egfr, synthetic_medications
+from app.seed import cohort_plan, synthetic_ascvd_code, synthetic_medications
 from app.terminology import ATC_SYSTEM, LOINC_SYSTEM, LOINC_VERSION, SNOMED_SYSTEM, map_measurement
 
 NOW = datetime(2026, 11, 1, tzinfo=timezone.utc)
@@ -195,8 +195,10 @@ def test_mcp_tool_uses_clinical_boundary(cohort, monkeypatch):
 
 
 def test_seed_generators_cover_review_fixtures():
-    assert all(synthetic_egfr(i) is not None for i in range(1, 501)) and synthetic_egfr(49) == 17.0  # every profile has an eGFR
-    assert all(20 <= synthetic_egfr(i) < 60 for i in range(6, 600, 6) if i % 100 not in {9, 49})
+    _, _, egfr_plan = cohort_plan(500)
+    assert egfr_plan[49] == 17.0 and all(egfr_plan[i] is not None for i in range(1, 501) if i % 100 in {35, 49, 65})
+    assert sum(value is None for value in egfr_plan.values()) == 45  # creatinine not tested: 9.01 % (NDR 2023)
+    assert sum(20 <= value < 60 for value in egfr_plan.values() if value is not None) > 60  # enough CKD G3-G4 for the review list
     assert synthetic_ascvd_code(5) and synthetic_ascvd_code(7) is None
     stopped = synthetic_medications(35, "p", 70.0, True)
     assert any(item.status == "stopped" and item.atc_code == "A10BK01" for item in stopped)

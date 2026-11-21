@@ -221,7 +221,7 @@ def patient_renal_profile(patient_id: str, user: User = Depends(require_roles("a
     """Seven-analyte renal profile series for charting (synthetic; display flags only)."""
     patient = authorised_patient(patient_id, user, db)
     observations = list(db.scalars(select(Observation).where(Observation.patient_id == patient.id).order_by(Observation.observed_at)).all())
-    return {"patient_id": patient.id, "reference": patient.reference, **renal_profile(observations)}
+    return {"patient_id": patient.id, "reference": patient.reference, **renal_profile(observations, patient.sex)}
 
 
 @app.get("/api/fhir/r4/Patient/{patient_id}", response_class=FhirR4JsonResponse)
@@ -592,7 +592,7 @@ def serialize_user(user: User) -> dict:
 
 def serialize_patient(patient: Patient, db: Session) -> dict:
     organization = db.get(Organization, patient.organization_id)
-    return {"id": patient.id, "reference": patient.reference, "care_setting": patient.care_setting, "age_group": patient.age_group, "organization": organization.name if organization else None, "district": organization.district if organization else None, "pregnancy_related": patient.pregnancy_related, "body_mass_index": patient.body_mass_index, "documented_complexity": patient.documented_complexity, "data_label": "Synthetic data — demonstration only"}
+    return {"id": patient.id, "reference": patient.reference, "care_setting": patient.care_setting, "age_group": patient.age_group, "sex": patient.sex, "organization": organization.name if organization else None, "district": organization.district if organization else None, "pregnancy_related": patient.pregnancy_related, "body_mass_index": patient.body_mass_index, "documented_complexity": patient.documented_complexity, "data_label": "Synthetic data — demonstration only"}
 
 
 def serialize_observation(item: Observation) -> dict:

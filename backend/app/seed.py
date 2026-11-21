@@ -9,7 +9,8 @@ from .config import get_settings
 from .db import SessionLocal, initialise_database
 from .models import AuditEvent, Condition, MedicationStatement, Observation, Organization, Patient, ResearchGrant, SourceBatch, User
 from .security import hash_password, verify_password
-from .renal_profile import seed_codes, synthetic_renal_panels, synthetic_sex_is_female
+from .cohort import CohortMember, assign_sex, plan_egfr
+from .renal_profile import seed_codes, synthetic_renal_panels
 from .treatment import Profile, Regimen, plan_treatment
 from .terminology import ATC_MEDICATIONS, ATC_SYSTEM, LOINC_SYSTEM, LOINC_VERSION, SNOMED_CONDITIONS, SNOMED_SYSTEM, TerminologyError, map_measurement
 
@@ -42,18 +43,34 @@ def care_matrix_for(total: int) -> list[tuple[int, str, int]]:
     return [(org, setting, count) for (org, setting, _), count in zip(BASE_CARE_MATRIX, counts)]
 
 
-def synthetic_egfr(index: int) -> float:
-    """Deterministic CKD-EPI eGFR spread: mostly preserved, ~1 in 6 below 60, one below 20 per 100.
+def synthetic_patient_attributes(total: int) -> list[dict]:
+    """Deterministic per-profile attributes, in SYN-DM ordinal order (index = ordinal)."""
+    rows = []
+    ordinal = 0
+    for org_index, setting, count in care_matrix_for(total):
+        for local_index in range(count):
+            ordinal += 1
+            rows.append({
+                "index": ordinal, "org_index": org_index, "care_setting": setting,
+                "age_group": "18-44" if ordinal % 3 == 0 else "45-64" if ordinal % 3 == 1 else "65+",
+                "symptomatic": ordinal % 17 == 0, "pregnancy_related": setting == "O&G Ward" and local_index % 4 == 0,
+                "body_mass_index": 33.0 if ordinal % 100 in {11, 22, 44} else 24.0 + (ordinal % 7),
+                "documented_complexity": ordinal % 11 == 0,
+            })
+    return rows
 
-    Every profile has an eGFR so that all patients carry a complete seven-analyte
-    renal profile. (The former missing-eGFR fixture at index % 100 == 9 was retired;
-    the care-gap "insufficient evidence" state remains covered by unit tests.)
-    """
-    if index % 100 == 49:
-        return 17.0  # below the guideline SGLT2-inhibitor initiation threshold
-    if index % 6 == 0:
-        return float(32 + (index * 7) % 27)  # 32-58: CKD G3a/G3b range
-    return 72.0 - (index % 9)
+
+def abnormal_glycaemia(index: int) -> bool:
+    return index % 11 == 0 or index % 100 in {1, 17, 45}
+
+
+def cohort_plan(total: int) -> tuple[list[dict], dict[int, str], dict[int, float | None]]:
+    """Attributes, NDR-calibrated sex and eGFR (None = creatinine not tested) for `total` profiles."""
+    attributes = synthetic_patient_attributes(total)
+    members = [CohortMember(index=row["index"], age_group=row["age_group"], care_setting=row["care_setting"],
+                            pregnancy_related=row["pregnancy_related"], has_ascvd=synthetic_ascvd_code(row["index"]) is not None,
+                            abnormal_glycaemia=abnormal_glycaemia(row["index"])) for row in attributes]
+    return attributes, assign_sex(members), plan_egfr(members)
 
 
 def synthetic_ascvd_code(index: int) -> str | None:
@@ -170,23 +187,21 @@ def seed() -> None:
         db.flush()
         db.add(ResearchGrant(user_id=users[5].id, organization_id=None, purpose="Synthetic regional surveillance demonstration", scope="fixed-district-rate", expires_at=ANCHOR + timedelta(days=365)))
 
-        total_profiles = get_settings().seed_patient_count
-        care_matrix = care_matrix_for(total_profiles)
+        attributes, sex_plan, egfr_plan = cohort_plan(get_settings().seed_patient_count)
         patients: list[Patient] = []
-        ordinal = 0
-        for org_index, setting, count in care_matrix:
-            for local_index in range(count):
-                ordinal += 1
-                patient = Patient(reference=f"SYN-DM-{ordinal:03d}", organization_id=organisations[org_index].id, care_setting=setting, age_group=("18-44" if ordinal % 3 == 0 else "45-64" if ordinal % 3 == 1 else "65+"), symptomatic=ordinal % 17 == 0, pregnancy_related=setting == "O&G Ward" and local_index % 4 == 0, body_mass_index=33.0 if ordinal % 100 in {11, 22, 44} else 24.0 + (ordinal % 7), documented_complexity=ordinal % 11 == 0)
-                patients.append(patient)
-                db.add(patient)
+        for row in attributes:
+            patient = Patient(reference=f"SYN-DM-{row['index']:03d}", organization_id=organisations[row["org_index"]].id, care_setting=row["care_setting"],
+                              age_group=row["age_group"], sex=sex_plan[row["index"]], symptomatic=row["symptomatic"], pregnancy_related=row["pregnancy_related"],
+                              body_mass_index=row["body_mass_index"], documented_complexity=row["documented_complexity"])
+            patients.append(patient)
+            db.add(patient)
         db.flush()
 
         profiles = []
         for index, patient in enumerate(patients, start=1):
-            egfr_value, ascvd = synthetic_egfr(index), synthetic_ascvd_code(index) is not None
+            egfr_value, ascvd = egfr_plan[index], synthetic_ascvd_code(index) is not None
             profiles.append(Profile(index=index, egfr=egfr_value, has_ascvd=ascvd, on_sglt2=synthetic_on_sglt2(index, egfr_value, ascvd),
-                                    abnormal_glycaemia=index % 11 == 0 or index % 100 in {1, 17, 45}, age_group=patient.age_group,
+                                    abnormal_glycaemia=abnormal_glycaemia(index), age_group=patient.age_group,
                                     care_setting=patient.care_setting, pregnancy_related=patient.pregnancy_related))
         treatment_plan = plan_treatment(profiles)
 
@@ -194,17 +209,17 @@ def seed() -> None:
         medications: list[MedicationStatement] = []
         observations: list[Observation] = []
         for index, patient in enumerate(patients, start=1):
-            abnormal = index % 11 == 0 or index % 100 in {1, 17, 45}
+            abnormal = abnormal_glycaemia(index)
             hba1c_early, hba1c_late = (6.0, 7.1) if abnormal else (5.8, 6.0)
             fpg_early, fpg_late = (6.1, 7.6) if abnormal else (5.4, 5.8)
             unit = "mg/dL" if index % 100 == 7 else "mmol/L"
             values = [("hba1c", hba1c_early, "%", 50), ("fpg", fpg_early, unit, 48), ("hba1c", hba1c_late, "%", 12), ("fpg", fpg_late, unit, 10)]
-            egfr = synthetic_egfr(index)
+            egfr = egfr_plan[index]
             if egfr is not None:
                 values.append(("egfr", egfr, "mL/min/{1.73_m2}", 8))
             # Synthetic renal profile (Na, K, Cl, creatinine, urea, uric acid, eGFR)
             # at three visits; the latest eGFR above is reused, not duplicated.
-            for panel in synthetic_renal_panels(index, patient.age_group, egfr):
+            for panel in synthetic_renal_panels(index, patient.age_group, egfr, patient.sex):
                 values.extend(panel)
             conditions.append(Condition(
                 patient_id=patient.id, source_id=f"COND-{index:03d}", version=1,
@@ -249,7 +264,7 @@ def seed() -> None:
                         "conversion_provenance": {"reason": "deliberate synthetic incompatible-unit fixture"},
                     }
                 renal_extra = ({"renal_profile": True, "creatinine_back_calculated": "CKD-EPI 2021",
-                                "assumed_sex": "female" if synthetic_sex_is_female(index) else "male"} if code == "creatinine" else
+                                "sex": patient.sex} if code == "creatinine" else
                                {"renal_profile": True} if loinc_code not in {"4548-4", "14749-6"} else {})
                 observations.append(Observation(
                     patient_id=patient.id, code=(mapping["clinical_key"] if code not in {"hba1c", "fpg", "egfr"} and mapping["clinical_key"] else code), value=value, unit=item_unit,
@@ -269,7 +284,7 @@ def seed() -> None:
         batch = build_source_batch(observations)
         db.add(batch)
         db.flush()
-        db.add(AuditEvent(actor_id=users[0].id, event_type="seed.completed", entity_type="source_batch", entity_id=batch.id, detail={"patients": len(patients), "observations": len(observations), "conditions": len(conditions), "medication_statements": len(medications), "care_mix": {setting: sum(c for _, name, c in care_matrix if name == setting) for setting in ("Outpatient Clinic", "Medical Ward", "Surgical Ward", "O&G Ward")}}))
+        db.add(AuditEvent(actor_id=users[0].id, event_type="seed.completed", entity_type="source_batch", entity_id=batch.id, detail={"patients": len(patients), "observations": len(observations), "conditions": len(conditions), "medication_statements": len(medications), "care_mix": {setting: sum(row["care_setting"] == setting for row in attributes) for setting in ("Outpatient Clinic", "Medical Ward", "Surgical Ward", "O&G Ward")}, "sex": {sex: sum(value == sex for value in sex_plan.values()) for sex in ("female", "male")}, "egfr_not_tested": sum(value is None for value in egfr_plan.values())}))
         db.commit()
 
 

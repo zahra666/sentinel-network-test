@@ -6,7 +6,7 @@ type RecordValue = Record<string, any>;
 
 const fmt = (value: number | null | undefined, decimals = 1) => value == null ? "—" : value.toFixed(decimals);
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit", timeZone: "Asia/Kuala_Lumpur" });
-const refText = (ref: RecordValue) => ref.high == null ? `≥ ${ref.low}` : `${ref.low} – ${ref.high}`;
+const refText = (ref: RecordValue) => (ref.high == null ? `≥ ${ref.low}` : `${ref.low} – ${ref.high}`) + (ref.sex ? ` (${ref.sex === "female" ? "F" : "M"})` : "");
 
 /** Seven-analyte renal profile: report-style latest panel plus one trend chart per analyte. */
 export function RenalProfile({ profile }: { profile: RecordValue }) {
@@ -31,7 +31,7 @@ export function RenalProfile({ profile }: { profile: RecordValue }) {
         const point = a.series.find((p: RecordValue) => p.date === date);
         return <tr key={a.code} className={point?.flag ? `flag-${point.flag}` : ""}>
           <td className="strong">{a.label}<small><code>{a.loinc}</code></small></td>
-          <td className="num"><b>{point ? fmt(point.value, a.decimals) : "—"}</b>{point?.flag && <span className={`renal-flag ${point.flag}`}>{point.flag}</span>}<small>{a.unit}</small></td>
+          <td className="num">{!a.series.length ? <small className="renal-nt">Not tested</small> : <b>{point ? fmt(point.value, a.decimals) : "—"}</b>}{point?.flag && <span className={`renal-flag ${point.flag}`}>{point.flag}</span>}{a.series.length > 0 && <small>{a.unit}</small>}</td>
           <td><small>{refText(a.reference)}</small></td>
           <td><MiniTrend analyte={a} selected={date} /></td>
         </tr>;
@@ -41,7 +41,7 @@ export function RenalProfile({ profile }: { profile: RecordValue }) {
       return point?.value != null ? <p className="renal-note">eGFR (CKD-EPI) {fmt(point.value)} · KDIGO category {category(point.value)} for this single value. One result is not a CKD diagnosis; persistence over ≥3 months and albuminuria are needed.</p> : null; })()}
 
     <div className="renal-grid">{analytes.map((a) => <AnalyteChart key={a.code} analyte={a} selected={date} />)}</div>
-    <p className="renal-foot">Synthetic data. {profile.reference_source} H/L flags mirror a laboratory report and are display aids only.</p>
+    <p className="renal-foot">Synthetic data. {profile.sex ? `Reference intervals for a ${profile.sex} adult. ` : ""}{profile.reference_source} H/L flags mirror a laboratory report and are display aids only.</p>
   </div>;
 }
 
@@ -83,7 +83,7 @@ function AnalyteChart({ analyte, selected }: { analyte: RecordValue, selected: s
   const head = <div className="renal-card-head"><span>{analyte.label}</span>
     <b className={latest?.flag ? `f-${latest.flag}` : ""}>{latest ? fmt(latest.value, analyte.decimals) : "—"}{latest?.flag && <em>{latest.flag}</em>}</b>
     <small>{analyte.unit}</small></div>;
-  if (!points.length) return <div className="renal-card">{head}<div className="renal-empty">No verified results.</div></div>;
+  if (!points.length) return <div className="renal-card">{head}<div className="renal-empty">{analyte.series.length ? "No verified results." : analyte.code === "egfr" ? "Not available: creatinine not tested." : "Not tested in this period."}</div></div>;
   const { lo, hi } = scale(points, ref);
   const t0 = points[0].t, t1 = points[points.length - 1].t;
   const x = (t: number) => L + (t1 === t0 ? 0.5 : (t - t0) / (t1 - t0)) * (W - L - R);

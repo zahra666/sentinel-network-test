@@ -74,6 +74,9 @@ class Patient(Base):
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
     care_setting: Mapped[str] = mapped_column(String(40), index=True)
     age_group: Mapped[str] = mapped_column(String(32))
+    # Administrative sex for the synthetic cohort ("female" / "male"); used for
+    # sex-specific reference intervals and the CKD-EPI creatinine equation.
+    sex: Mapped[str | None] = mapped_column(String(16), nullable=True)
     symptomatic: Mapped[bool] = mapped_column(Boolean, default=False)
     pregnancy_related: Mapped[bool] = mapped_column(Boolean, default=False)
     body_mass_index: Mapped[float | None] = mapped_column(Float, nullable=True)

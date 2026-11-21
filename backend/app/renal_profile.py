@@ -34,18 +34,35 @@ ANALYTES: list[tuple[str, str, str, str, str, int]] = [
 ]
 CODE_FOR_LOINC = {loinc: code for code, loinc, *_ in ANALYTES}
 
-# Demo adult reference intervals in the style of a Malaysian hospital renal
-# profile. Real intervals are laboratory-, method- and sex-specific.
+# Adult reference intervals. Creatinine and urate are sex-specific: University
+# Hospitals Birmingham NHS (creatinine F 49-90 / M 64-104 umol/L, Abbott;
+# urate F 140-360 / M 200-430 umol/L, UK Pathology Harmony). Na, K, Cl and urea
+# follow the layout of a Malaysian hospital renal profile. Real intervals are
+# laboratory- and method-specific.
 REFERENCE_INTERVALS: dict[str, dict] = {
     "sodium": {"low": 136, "high": 145},
     "potassium": {"low": 3.5, "high": 5.1},
     "chloride": {"low": 98, "high": 107},
-    "creatinine": {"low": 63.6, "high": 110.5, "note": "adult male interval"},
+    "creatinine": {"by_sex": {"female": {"low": 49, "high": 90}, "male": {"low": 64, "high": 104}}},
     "urea": {"low": 2.8, "high": 8.1},
-    "uric_acid": {"low": 210, "high": 420, "note": "adult male interval"},
+    "uric_acid": {"by_sex": {"female": {"low": 140, "high": 360}, "male": {"low": 200, "high": 430}}},
     "egfr": {"low": 60, "high": None, "note": "values below 60 are flagged; a single value is not a CKD diagnosis"},
 }
-REFERENCE_SOURCE = "Demo reference intervals (illustrative adult intervals, local-laboratory style); not for clinical use."
+REFERENCE_SOURCE = ("Adult reference intervals; creatinine and uric acid are sex-specific (UHB NHS: Abbott creatinine, "
+                    "UK Pathology Harmony urate). Illustrative only; not for clinical use.")
+
+
+def reference_for(code: str, sex: str | None) -> dict:
+    interval = REFERENCE_INTERVALS[code]
+    if "by_sex" not in interval:
+        return interval
+    if sex in interval["by_sex"]:
+        return {**interval["by_sex"][sex], "sex": sex}
+    # Sex unknown: show the widest span so neither sex is flagged spuriously.
+    low = min(v["low"] for v in interval["by_sex"].values())
+    high = max(v["high"] for v in interval["by_sex"].values())
+    return {"low": low, "high": high, "note": "sex not recorded; combined female/male span"}
+
 
 # Panels drawn at these offsets (days before the seed anchor). The final panel
 # reuses the patient's existing eGFR observation (8 days before anchor).
@@ -73,19 +90,15 @@ def creatinine_for_egfr(egfr: float, age: float, female: bool) -> float:
     return (low + high) / 2
 
 
-def synthetic_sex_is_female(index: int) -> bool:
-    """Synthetic assumption used only for the creatinine back-calculation."""
-    return index % 2 == 0
-
-
-def synthetic_renal_panels(index: int, age_group: str, final_egfr: float | None) -> list[list[tuple[str, float, str, int]]]:
+def synthetic_renal_panels(index: int, age_group: str, final_egfr: float | None, sex: str | None = None) -> list[list[tuple[str, float, str, int]]]:
     """Return panels oldest-first as [(code, value, unit, days_ago), ...].
 
     The final panel omits eGFR because the seed already records it. When eGFR
-    is deliberately missing (fixture), creatinine and eGFR are omitted too.
+    is None (creatinine not tested, ~9 % per NDR 2023), creatinine and eGFR are
+    omitted at every visit; the other five analytes are still reported.
     """
     rng = random.Random(index * 1009 + 17)
-    female = synthetic_sex_is_female(index)
+    female = sex == "female"
     age = AGE_FOR_GROUP.get(age_group, 55)
     # Annual eGFR loss: faster with existing CKD, slow otherwise.
     if final_egfr is None:
@@ -137,10 +150,10 @@ def seed_codes(code: str) -> tuple[str, str]:
     raise KeyError(code)
 
 
-def flag(code: str, value: float | None) -> str | None:
-    interval = REFERENCE_INTERVALS.get(code)
-    if value is None or not interval:
+def flag(code: str, value: float | None, sex: str | None = None) -> str | None:
+    if value is None or code not in REFERENCE_INTERVALS:
         return None
+    interval = reference_for(code, sex)
     if interval.get("low") is not None and value < interval["low"]:
         return "L"
     if interval.get("high") is not None and value > interval["high"]:
@@ -158,7 +171,7 @@ def kdigo_g_category(egfr: float | None) -> str | None:
     return "G5"
 
 
-def renal_profile(observations: Iterable) -> dict:
+def renal_profile(observations: Iterable, sex: str | None = None) -> dict:
     """Chart-ready series for the seven analytes, using effective source versions."""
     latest_version: dict[str, object] = {}
     for item in observations:
@@ -182,16 +195,17 @@ def renal_profile(observations: Iterable) -> dict:
             day = obs.observed_at.date().isoformat()
             panel_dates.add(day)
             series.append({"observed_at": obs.observed_at.isoformat(), "date": day, "value": value,
-                           "original_value": obs.value, "original_unit": obs.unit, "flag": flag(code, value),
+                           "original_value": obs.value, "original_unit": obs.unit, "flag": flag(code, value, sex),
                            "terminology_status": obs.terminology_status, "source_id": obs.source_id, "version": obs.version})
         term = LAB_TERMS.get(loinc)
         latest = next((point for point in reversed(series) if point["value"] is not None), None)
         analytes.append({
             "code": code, "label": label, "unit": unit.replace("{1.73_m2}", "1.73m²").replace("umol", "µmol"), "decimals": decimals,
             "loinc": loinc, "loinc_display": term.display if term else None,
-            "reference": REFERENCE_INTERVALS[code], "series": series, "latest": latest,
+            "reference": reference_for(code, sex), "series": series, "latest": latest,
             "category": kdigo_g_category(latest["value"]) if code == "egfr" and latest else None,
         })
     return {"analytes": analytes, "panel_dates": sorted(panel_dates), "reference_source": REFERENCE_SOURCE,
-            "egfr_equation_note": "Synthetic creatinine is back-calculated from the stored eGFR with CKD-EPI 2021 and an assumed synthetic age/sex.",
+            "sex": sex,
+            "egfr_equation_note": "Synthetic creatinine is back-calculated from the stored eGFR with CKD-EPI 2021, the patient's sex and an age-group midpoint.",
             "synthetic_only": True}

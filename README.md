@@ -134,15 +134,25 @@ Every seeded patient has a glucose-lowering regimen: oral glucose-lowering drugs
 - **API/UI**: `GET /api/patients` adds a `treatment` field (Treatment column in Patients); `GET /api/patients/{id}` adds the active list with route; `GET /api/treatment/summary` gives cohort vs NDR (administrator: all; clinician: own hospital).
 - **Limits**: the NDR covers public primary care; hospital and specialist cohorts use more insulin. The NDR does not report DPP-4 or SGLT2 inhibitor use. This is a synthetic demonstration, not a prescribing model.
 
-## Synthetic renal profile (U&E panel)
+## Synthetic renal profile (U&E panel), sex and kidney function
 
-Every seeded patient (all 500 in the demo) gets a complete renal profile at three visits (about 12 months, 6 months and 8 days before the anchor date): sodium, potassium, chloride, creatinine, urea, uric acid and eGFR — the same seven analytes as a Malaysian hospital "Renal Profile" report.
+Every seeded patient has a renal profile at three visits (about 12 months, 6 months and 8 days before the anchor date): sodium, potassium, chloride, creatinine, urea, uric acid and eGFR — the seven analytes of a Malaysian hospital "Renal Profile" report.
 
-- **Consistent values**: creatinine is back-calculated from the patient's existing CKD-EPI eGFR using the CKD-EPI 2021 equation and an assumed synthetic age/sex (recorded in each observation's provenance). Earlier visits have a slightly higher eGFR (faster decline when eGFR < 60). Potassium, urea and uric acid rise as eGFR falls. A few deterministic profiles show high chloride or uric acid.
-- **Existing logic unchanged**: the latest eGFR is the same record as before, so the CPG review and the SGLT2 care-gap list give identical results. New analytes are verified LOINC terms that do not feed any detection rule.
-- **API**: `GET /api/patients/{id}/renal-profile` (administrator: all; clinician: own organisation; researcher/CAIO: no access). Returns per-analyte series, reference interval, H/L flag and the KDIGO G category of the latest eGFR. Corrected versions supersede earlier ones without double-plotting.
-- **UI**: Patients → select a record → *Renal profile* card: report-style table for a chosen visit date, plus one trend chart per analyte with the reference band shaded.
-- **Limits**: reference intervals are illustrative adult (male) intervals, not lab- or sex-specific. H/L flags are display aids that mirror a lab report; they are not diagnosis, triage or urgency. A single eGFR category is not a CKD diagnosis (needs ≥3 months and albuminuria/UACR, which is not modelled). `supabase/seed_synthetic.sql` does not include the renal profile; use the backend seed. After switching to this branch, delete `backend/sentinel.db` before starting.
+**Real-world calibration** (`backend/app/cohort.py`):
+
+| Item | Source | Value used | 500-patient cohort |
+|---|---|---|---|
+| Sex | NDR Report 2023, Table 2 (registry, n = 1,946,133) | female 57.08 % / male 42.92 % | 285 F / 215 M (O&G ward records are female) |
+| Creatinine tested in the year | NDR Report 2023, Table 6 (audit, n = 113,903) | 90.99 % | 455 with creatinine + eGFR; 45 (9.0 %) without |
+| eGFR G3a / G3b / G4 / G5 | NDR 2022 audit, Sci Rep 2024;14:7247 (n = 80,360) | 12.4 / 6.9 / 2.4 / 0.7 % | 12.5 / 6.8 / 2.4 / 0.7 % |
+| eGFR G1 / G2 | No Malaysian split published; UK CPRD T2DM G1:G2 ratio (PMC6767485) applied to the remaining 77.6 % | 30.7 / 46.9 % | 30.8 / 46.8 % |
+
+- Lower eGFR is assigned preferentially to older patients and those with ASCVD or poorer glycaemic evidence (mean eGFR ≈ 94 at 18–44, 78 at 45–64, 57 at 65+). Earlier visits have a slightly higher eGFR.
+- Creatinine is back-calculated with **CKD-EPI 2021** from each patient's eGFR, **recorded sex** and age-group midpoint. Patients without a creatinine test still have Na, K, Cl, urea and uric acid; the UI shows creatinine and eGFR as "Not tested". These records return `insufficient_evidence` in the SGLT2 review when ASCVD is present — as intended.
+- **Sex-specific reference intervals**: creatinine F 49–90 / M 64–104 µmol/L (Abbott, per UHB NHS); uric acid F 140–360 / M 200–430 µmol/L (UK Pathology Harmony). Na 136–145, K 3.5–5.1, Cl 98–107, urea 2.8–8.1 follow the Malaysian report layout. A creatinine above range with eGFR 60–89 is expected for middle-aged men (e.g. 55-year-old man, eGFR 65 → creatinine ≈ 115 µmol/L).
+- **Schema**: new nullable `patients.sex` (`female`/`male`), migration `20261121170000_add_patient_sex.sql`; the local SQLite demo adds the column automatically. FHIR `Patient.gender` is exported when sex is recorded.
+- **API**: `GET /api/patients/{id}/renal-profile` (administrator: all; clinician: own organisation; researcher/CAIO: no access). Returns series, sex-specific reference interval, H/L flag and the KDIGO G category of the latest eGFR. Corrected versions supersede earlier ones without double-plotting.
+- **Limits**: H/L flags are display aids, not diagnosis, triage or urgency. A single eGFR category is not a CKD diagnosis (needs ≥3 months and albuminuria/UACR, not modelled). Age groups keep the original equal-thirds design (NDR patients are older). `supabase/seed_synthetic.sql` does not include these data; use the backend seed. After switching to this branch, delete `backend/sentinel.db` before starting.
 
 ## Healthcare interoperability — focused FHIR R4 MVP
 

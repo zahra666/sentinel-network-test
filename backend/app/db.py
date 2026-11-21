@@ -67,6 +67,6 @@ def initialise_database() -> None:
             if name not in columns:
                 connection.exec_driver_sql(f"alter table observations add column {name} {ddl}")
         # Live Monitor columns added after its first release (local SQLite demo only).
-        for table, name, ddl in (("simulation_runs", "last_statuses", "json not null default '{}'"), ("live_status_snapshots", "events", "json not null default '{}'")):
+        for table, name, ddl in (("patients", "sex", "varchar(16)"), ("simulation_runs", "last_statuses", "json not null default '{}'"), ("live_status_snapshots", "events", "json not null default '{}'")):
             if name not in {item["name"] for item in inspect(connection).get_columns(table)}:
                 connection.exec_driver_sql(f"alter table {table} add column {name} {ddl}")

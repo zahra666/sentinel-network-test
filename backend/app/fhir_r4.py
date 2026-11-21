@@ -132,7 +132,7 @@ def _authorise_patient(patient: Patient, user: User) -> None:
 
 
 def patient_resource(patient: Patient) -> dict[str, Any]:
-    return {
+    resource = {
         "resourceType": "Patient", "id": patient.id, "meta": {"versionId": "1"}, "active": True,
         "identifier": [{"system": PATIENT_IDENTIFIER_SYSTEM, "value": patient.reference}],
         "extension": [
@@ -140,6 +140,9 @@ def patient_resource(patient: Patient) -> dict[str, Any]:
             {"url": "https://sentinel.demo/fhir/StructureDefinition/synthetic-only", "valueBoolean": True},
         ],
     }
+    if getattr(patient, "sex", None) in {"female", "male"}:
+        resource["gender"] = patient.sex  # FHIR R4 AdministrativeGender
+    return resource
 
 
 def observation_resource(item: Observation) -> dict[str, Any]:

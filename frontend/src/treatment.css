@@ -23,8 +23,10 @@
 .patients-page { display: grid; gap: 20px; }
 .table.with-treatment th, .table.with-treatment td { padding-left: 8px; padding-right: 8px; }
 .table.with-treatment th:first-child, .table.with-treatment td:first-child { padding-left: 16px; }
-.table.with-treatment th:last-child, .table.with-treatment td:last-child { padding-right: 10px; }
-.table.with-treatment td:nth-child(2) { white-space: normal; min-width: 76px; font-size: 13px; }
+.table.with-treatment th:last-child, .table.with-treatment td:last-child { padding-right: 8px; }
+.table.with-treatment td:nth-child(2) { white-space: normal; min-width: 72px; font-size: 13px; }
 .table.with-treatment td:nth-child(3) { padding-left: 4px; }
 .table.with-treatment .tx-chip { font-size: 11px; padding: 2px 6px; }
 .table.with-treatment .tx-chip svg { display: none; }
+.table.with-treatment td:first-child small { font-size: 11.5px; }
+.table.with-treatment td:nth-child(3) small { display: inline; font-size: 11px; margin-left: 2px; }

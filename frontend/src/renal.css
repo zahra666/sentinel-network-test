@@ -38,3 +38,4 @@
 .renal-table th:first-child, .renal-table td:first-child { padding-left: 4px; }
 .renal-table td.num small { display: inline; margin-left: 4px; font-size: 11px; }
 .renal-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); }
+.renal-nt { display: inline !important; color: var(--warning) !important; font-size: 12px !important; }

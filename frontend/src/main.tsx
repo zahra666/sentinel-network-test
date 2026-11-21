@@ -218,7 +218,7 @@ function Patients({ patients, token }: { patients: RecordValue[], token: string 
     <Card title="Patients" count={patients.length} flush actions={<label className="search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" aria-label="Search patients" /></label>}>
       <div className="table-scroll"><table className="table selectable with-treatment"><thead><tr><th>Patient</th><th>Care setting</th><th>Age</th><th>Treatment</th><th>Scope</th></tr></thead><tbody>
         {shown.map((patient) => <tr key={patient.id} className={selected?.id === patient.id ? "selected" : ""} onClick={() => choose(patient)}>
-          <td><b>{patient.reference}</b><small>{patient.organization}</small></td><td>{patient.care_setting}</td><td className="num">{patient.age_group}</td><td><TreatmentChip treatment={patient.treatment} /></td>
+          <td><b>{patient.reference}</b><small>{patient.organization}</small></td><td>{patient.care_setting}</td><td className="num">{patient.age_group}{patient.sex && <small title={patient.sex === "female" ? "Female" : "Male"}>{patient.sex === "female" ? "F" : "M"}</small>}</td><td><TreatmentChip treatment={patient.treatment} /></td>
           <td><Badge tone={patient.pregnancy_related ? "warning" : "neutral"}>{patient.pregnancy_related ? "Scope check" : "In scope"}</Badge></td></tr>)}
       </tbody></table></div>
     </Card>
@@ -236,7 +236,7 @@ const TEST_LABELS: Record<string, string> = { hba1c: "HbA1c", fpg: "Fasting gluc
 function PatientEvidence({ detail }: { detail: RecordValue }) {
   const status = detail.guideline_assessment.status;
   const hba1c: number[] = detail.observations.filter((o: RecordValue) => o.code === "hba1c" && o.normalised_value != null).sort((x: RecordValue, y: RecordValue) => +new Date(x.observed_at) - +new Date(y.observed_at)).map((o: RecordValue) => o.normalised_value);
-  return <Card title={detail.reference} subtitle={`${detail.care_setting} · ${detail.organization || ""}${detail.body_mass_index ? ` · BMI ${detail.body_mass_index}` : ""}`} actions={<>{hba1c.length > 1 && <span className="spark-wrap"><small>HbA1c</small><Sparkline values={hba1c} width={96} height={30} /></span>}<Badge tone={toneFor(status)}>{human(status)}</Badge></>} flush>
+  return <Card title={detail.reference} subtitle={`${detail.care_setting} · ${detail.organization || ""}${detail.sex ? ` · ${detail.sex === "female" ? "Female" : "Male"}, ${detail.age_group}` : ""}${detail.body_mass_index ? ` · BMI ${detail.body_mass_index}` : ""}`} actions={<>{hba1c.length > 1 && <span className="spark-wrap"><small>HbA1c</small><Sparkline values={hba1c} width={96} height={30} /></span>}<Badge tone={toneFor(status)}>{human(status)}</Badge></>} flush>
     <table className="table compact"><thead><tr><th>Test</th><th className="num">Result</th><th>Date</th><th>Code</th></tr></thead><tbody>
       {detail.observations.map((observation: RecordValue) => <tr key={observation.id}>
         <td className="strong">{TEST_LABELS[observation.code] || observation.coding?.display || observation.code}{observation.is_corrected && <Badge tone="info">Corrected</Badge>}</td>

@@ -17,18 +17,20 @@ from app.db import Base, get_db
 from app.main import app
 from app.models import MedicationStatement, Organization, Patient, User
 from app.security import create_token
-from app.seed import synthetic_ascvd_code, synthetic_egfr, synthetic_medications, synthetic_on_sglt2
+from app.seed import abnormal_glycaemia, cohort_plan, synthetic_ascvd_code, synthetic_medications, synthetic_on_sglt2
 from app.terminology import ATC_MEDICATIONS, ATC_SYSTEM
 from app.treatment import NDR_2023, Profile, cohort_summary, largest_remainder, modality_of, plan_treatment, MODALITY_SHARES
 
 
 def profiles(n):
+    attributes, _, egfr_plan = cohort_plan(n)
     out = []
-    for i in range(1, n + 1):
-        egfr, ascvd = synthetic_egfr(i), synthetic_ascvd_code(i) is not None
+    for row in attributes:
+        i = row["index"]
+        egfr, ascvd = egfr_plan[i], synthetic_ascvd_code(i) is not None
         out.append(Profile(index=i, egfr=egfr, has_ascvd=ascvd, on_sglt2=synthetic_on_sglt2(i, egfr, ascvd),
-                           abnormal_glycaemia=i % 11 == 0 or i % 100 in {1, 17, 45}, age_group=("18-44", "45-64", "65+")[i % 3],
-                           care_setting=("Outpatient Clinic", "Medical Ward", "Surgical Ward")[i % 3], pregnancy_related=False))
+                           abnormal_glycaemia=abnormal_glycaemia(i), age_group=row["age_group"],
+                           care_setting=row["care_setting"], pregnancy_related=row["pregnancy_related"]))
     return out
 
 

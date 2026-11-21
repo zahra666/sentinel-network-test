@@ -18,9 +18,11 @@ from app.db import Base, get_db
 from app.guideline_tree import assessment
 from app.main import app
 from app.models import Observation, Organization, Patient, User
-from app.renal_profile import ANALYTES, ckd_epi_2021, creatinine_for_egfr, flag, kdigo_g_category, renal_profile, synthetic_renal_panels
+from app.cohort import EGFR_STAGES, NDR_2023_SEX, egfr_category
+from app.fhir_r4 import patient_resource
+from app.renal_profile import ANALYTES, ckd_epi_2021, creatinine_for_egfr, flag, kdigo_g_category, reference_for, renal_profile, synthetic_renal_panels
 from app.security import create_token
-from app.seed import synthetic_egfr
+from app.seed import cohort_plan
 from app.terminology import LOINC_SYSTEM, LOINC_VERSION, TerminologyError, compatible_for_rule, map_measurement
 
 NOW = datetime(2026, 11, 1, tzinfo=timezone.utc)
@@ -60,22 +62,48 @@ def test_ckd_epi_2021_inverse_round_trips():
 
 
 def test_seed_panels_keep_latest_egfr_and_are_internally_consistent():
-    for index in range(1, 101):
-        final = synthetic_egfr(index)
-        panels = synthetic_renal_panels(index, "45-64", final)
+    attributes, sex_plan, egfr_plan = cohort_plan(100)
+    for row in attributes:
+        index, final, sex = row["index"], egfr_plan[row["index"]], sex_plan[row["index"]]
+        panels = synthetic_renal_panels(index, row["age_group"], final, sex)
         assert len(panels) == 3
+        if final is None:  # creatinine not tested: the other five analytes are still reported
+            assert all([code for code, *_ in panel] == ["sodium", "potassium", "chloride", "urea", "uric_acid"] for panel in panels)
+            continue
         assert [code for code, *_ in panels[-1]] == ["sodium", "potassium", "chloride", "creatinine", "urea", "uric_acid"]  # latest eGFR is the seed's existing record
         for panel in panels[:-1]:
             assert [code for code, *_ in panel] == ["sodium", "potassium", "chloride", "creatinine", "urea", "uric_acid", "egfr"]
-            # Earlier visits never look better than the latest beyond a small measurement wobble.
             assert dict((c, v) for c, v, *_ in panel)["egfr"] >= final - 1.5
+        # Creatinine is consistent with the patient's own sex in CKD-EPI 2021.
+        creatinine = dict((c, v) for c, v, *_ in panels[-1])["creatinine"]
+        assert abs(ckd_epi_2021(creatinine, {"18-44": 38, "45-64": 55, "65+": 71}[row["age_group"]], sex == "female") - final) < 0.2
         assert all(isinstance(value, float) for panel in panels for _, value, *_ in panel)  # integrity hashes need stable floats
-    # A FHIR-imported record without eGFR still yields the five other analytes rather than failing.
-    assert [code for code, *_ in synthetic_renal_panels(9, "18-44", None)[0]] == ["sodium", "potassium", "chloride", "urea", "uric_acid"]
+
+
+def test_cohort_sex_and_egfr_follow_malaysian_data():
+    attributes, sex_plan, egfr_plan = cohort_plan(500)
+    female = sum(value == "female" for value in sex_plan.values())
+    assert female == round(500 * NDR_2023_SEX["female"] / 100)  # 285 of 500 (NDR 2023: 57.08 %)
+    assert all(sex_plan[row["index"]] == "female" for row in attributes if row["care_setting"] == "O&G Ward")
+    tested = [value for value in egfr_plan.values() if value is not None]
+    assert len(tested) == 455  # 90.99 % creatinine tested (NDR 2023)
+    for name, _low, _high, share in EGFR_STAGES:
+        assert abs(100 * sum(egfr_category(v) == name for v in tested) / len(tested) - share) <= 0.5, name
+    by_age = {group: [egfr_plan[r["index"]] for r in attributes if r["age_group"] == group and egfr_plan[r["index"]] is not None] for group in ("18-44", "65+")}
+    assert sum(by_age["65+"]) / len(by_age["65+"]) < sum(by_age["18-44"]) / len(by_age["18-44"]) - 20  # kidney function falls with age
+
+
+def test_sex_specific_reference_intervals_and_fhir_gender():
+    assert reference_for("creatinine", "female")["high"] == 90 and reference_for("creatinine", "male")["high"] == 104
+    assert reference_for("uric_acid", "female")["high"] == 360 and reference_for("uric_acid", "male")["high"] == 430
+    assert flag("creatinine", 95, "female") == "H" and flag("creatinine", 95, "male") is None
+    assert reference_for("creatinine", None) == {"low": 49, "high": 104, "note": "sex not recorded; combined female/male span"}
+    assert patient_resource(SimpleNamespace(id="p", reference="SYN", care_setting="Outpatient Clinic", sex="female"))["gender"] == "female"
+    assert "gender" not in patient_resource(SimpleNamespace(id="p", reference="SYN", care_setting="Outpatient Clinic", sex=None))
 
 
 def test_flags_and_categories_are_display_only():
-    assert flag("creatinine", 110.7) == "H" and flag("potassium", 3.4) == "L" and flag("sodium", 140) is None
+    assert flag("creatinine", 110.7, "male") == "H" and flag("potassium", 3.4) == "L" and flag("sodium", 140) is None
     assert flag("egfr", 70.5) is None and flag("egfr", 47) == "L"
     assert [kdigo_g_category(v) for v in (95, 70, 50, 35, 20, 10)] == ["G1", "G2", "G3a", "G3b", "G4", "G5"]
 
@@ -149,8 +177,8 @@ def test_renal_observations_do_not_change_cpg_review_inputs(cohort):
     assert result["nodes"][0]["state"] == "valid"
 
 
-def test_every_seeded_patient_has_a_complete_renal_profile():
-    """All profiles (500 in the demo) carry 7 analytes x 3 visits, all verified."""
+def test_every_seeded_patient_has_a_renal_profile():
+    """All 500 profiles have 3 renal panels; 455 have all 7 analytes, 45 (creatinine not tested) have 5."""
     import tempfile
     from sqlalchemy import create_engine as _ce, select as _select
     from sqlalchemy.orm import sessionmaker as _sm
@@ -168,11 +196,19 @@ def test_every_seeded_patient_has_a_complete_renal_profile():
         with factory() as db:
             patients = list(db.scalars(_select(Patient)).all())
             assert len(patients) == 500
+            complete = without_creatinine = 0
             for patient in patients:
-                profile = renal_profile(patient.observations)
+                assert patient.sex in {"female", "male"}
+                profile = renal_profile(patient.observations, patient.sex)
                 assert len(profile["panel_dates"]) == 3, patient.reference
+                present = {a["code"] for a in profile["analytes"] if a["series"]}
                 for analyte in profile["analytes"]:
-                    assert len(analyte["series"]) == 3 and all(p["value"] is not None for p in analyte["series"]), (patient.reference, analyte["code"])
+                    if analyte["code"] in present:
+                        assert len(analyte["series"]) == 3 and all(p["value"] is not None for p in analyte["series"]), (patient.reference, analyte["code"])
+                complete += len(present) == 7
+                without_creatinine += present == {"sodium", "potassium", "chloride", "urea", "uric_acid"}
+            assert (complete, without_creatinine) == (455, 45)
+            assert sum(p.sex == "female" for p in patients) == 285
     finally:
         seed_module.SessionLocal, seed_module.initialise_database = original[0], original[1]
         get_settings().seed_patient_count = original[2]
