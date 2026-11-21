@@ -380,6 +380,7 @@ td .badge + .badge, .strong .badge { margin-left: 8px; }
 .master-detail.patients-master-detail { align-items: stretch; }
 .patients-primary { height: clamp(460px, calc(100vh - 250px), 760px); min-height: 0; display: flex; flex-direction: column; }
 .patients-roster { height: clamp(520px, calc(100vh - 200px), 820px); }
+.patient-detail-card { height: clamp(520px, calc(100vh - 200px), 820px); }
 .patients-primary > .card-body { flex: 1; min-height: 0; overflow: hidden; }
 .patients-roster > .card-body { display: flex; flex-direction: column; }
 .patients-roster .table-scroll { flex: 1; height: auto; max-height: none; min-height: 0; }
@@ -407,6 +408,7 @@ td .badge + .badge, .strong .badge { margin-left: 8px; }
 @media (max-width: 640px) {
   .patients-primary { height: clamp(420px, calc(100vh - 210px), 680px); }
   .patients-roster { height: clamp(470px, calc(100vh - 160px), 740px); }
+  .patient-detail-card { height: clamp(470px, calc(100vh - 160px), 740px); }
   .patient-tab-list { padding: 0 10px; }
   .patient-tab { padding-right: 9px; padding-left: 9px; font-size: 11px; }
   .patient-tab-panel { padding: 14px; }
