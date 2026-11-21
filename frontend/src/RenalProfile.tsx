@@ -4,9 +4,9 @@ import "./renal.css";
 
 type RecordValue = Record<string, any>;
 
-const fmt = (value: number | null | undefined, decimals = 1) => value == null ? "—" : value.toFixed(decimals);
+const fmt = (value: number | null | undefined, decimals = 1) => value == null ? "n/a" : value.toFixed(decimals);
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit", timeZone: "Asia/Kuala_Lumpur" });
-const refText = (ref: RecordValue) => (ref.high == null ? `≥ ${ref.low}` : `${ref.low} – ${ref.high}`) + (ref.sex ? ` (${ref.sex === "female" ? "F" : "M"})` : "");
+const refText = (ref: RecordValue) => (ref.high == null ? `≥ ${ref.low}` : `${ref.low} to ${ref.high}`) + (ref.sex ? ` (${ref.sex === "female" ? "F" : "M"})` : "");
 
 /** Seven-analyte renal profile: report-style latest panel plus one trend chart per analyte. */
 export function RenalProfile({ profile }: { profile: RecordValue }) {
@@ -31,7 +31,7 @@ export function RenalProfile({ profile }: { profile: RecordValue }) {
         const point = a.series.find((p: RecordValue) => p.date === date);
         return <tr key={a.code} className={point?.flag ? `flag-${point.flag}` : ""}>
           <td className="strong">{a.label}<small><code>{a.loinc}</code></small></td>
-          <td className="num">{!a.series.length ? <small className="renal-nt">Not tested</small> : <b>{point ? fmt(point.value, a.decimals) : "—"}</b>}{point?.flag && <span className={`renal-flag ${point.flag}`}>{point.flag}</span>}{a.series.length > 0 && <small>{a.unit}</small>}</td>
+          <td className="num">{!a.series.length ? <small className="renal-nt">Not tested</small> : <b>{point ? fmt(point.value, a.decimals) : "n/a"}</b>}{point?.flag && <span className={`renal-flag ${point.flag}`}>{point.flag}</span>}{a.series.length > 0 && <small>{a.unit}</small>}</td>
           <td><small>{refText(a.reference)}</small></td>
           <td><MiniTrend analyte={a} selected={date} /></td>
         </tr>;
@@ -61,7 +61,7 @@ function scale(points: { t: number, v: number }[], ref: RecordValue) {
 
 function MiniTrend({ analyte, selected }: { analyte: RecordValue, selected: string }) {
   const points = usePoints(analyte);
-  if (points.length < 2) return <small className="muted">—</small>;
+  if (points.length < 2) return <small className="muted">n/a</small>;
   const W = 72, H = 24, P = 3;
   const { lo, hi } = scale(points, analyte.reference);
   const t0 = points[0].t, t1 = points[points.length - 1].t;
@@ -81,7 +81,7 @@ function AnalyteChart({ analyte, selected }: { analyte: RecordValue, selected: s
   const latest = analyte.latest;
   const W = 260, H = 118, L = 34, R = 8, T = 8, B = 18;
   const head = <div className="renal-card-head"><span>{analyte.label}</span>
-    <b className={latest?.flag ? `f-${latest.flag}` : ""}>{latest ? fmt(latest.value, analyte.decimals) : "—"}{latest?.flag && <em>{latest.flag}</em>}</b>
+    <b className={latest?.flag ? `f-${latest.flag}` : ""}>{latest ? fmt(latest.value, analyte.decimals) : "n/a"}{latest?.flag && <em>{latest.flag}</em>}</b>
     <small>{analyte.unit}</small></div>;
   if (!points.length) return <div className="renal-card">{head}<div className="renal-empty">{analyte.series.length ? "No verified results." : analyte.code === "egfr" ? "Not available: creatinine not tested." : "Not tested in this period."}</div></div>;
   const { lo, hi } = scale(points, ref);

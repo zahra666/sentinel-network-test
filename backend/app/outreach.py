@@ -102,8 +102,8 @@ def _compose(patient: Patient, organization: Organization | None, observations: 
         lines.append("Your doctor will explain what these results mean for you at your visit.")
     else:
         lines.append("Your results are available at your visit. They are not included here because you have not agreed to receive results by email.")
-    lines += ["", f"— {clinic} diabetes care team", "", "This reminder was drafted by Goola Agent and approved by a member of your care team.",
-              "Synthetic data — demonstration only."]
+    lines += ["", f"{clinic} diabetes care team", "", "This reminder was drafted by Goola Agent and approved by a member of your care team.",
+              "Synthetic data · demonstration only."]
     return template, subject, "\n".join(lines), included
 
 
@@ -161,7 +161,7 @@ def serialize_message(message: PatientMessage, db: Session) -> dict:
             "body": message.body, "includes_results": message.includes_results, "status": message.status,
             "drafted_by": message.drafted_by_agent, "approved_by": approver.email if approver else None,
             "approved_at": message.approved_at.isoformat() if message.approved_at else None, "delivery": message.delivery,
-            "created_at": message.created_at.isoformat(), "data_label": "Synthetic data — demonstration only"}
+            "created_at": message.created_at.isoformat(), "data_label": "Synthetic data · demonstration only"}
 
 
 def serialize_consent(consent: PatientContactConsent) -> dict:

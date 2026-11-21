@@ -404,5 +404,5 @@ def import_bundle(db: Session, user: User, bundle: Any) -> dict[str, Any]:
         result.append({"resourceType": "DiagnosticReport", "id": item.id if item else "", "status": status})
         if status == "imported":
             affected_patients.add(patient_id)
-    return {"fhir_version": FHIR_VERSION, "data_label": "Synthetic data — demonstration only", "results": result,
+    return {"fhir_version": FHIR_VERSION, "data_label": "Synthetic data · demonstration only", "results": result,
             "reprocess_patient_ids": sorted(affected_patients), "reprocess_required": bool(affected_patients)}

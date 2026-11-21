@@ -21,7 +21,7 @@ export const MODALITY_COLORS: Record<string, string> = {
 
 /** Compact table chip: syringe = injected insulin, pill = oral glucose-lowering drug(s). */
 export function TreatmentChip({ treatment, showCount = false }: { treatment?: RecordValue, showCount?: boolean }) {
-  if (!treatment) return <span className="tx-chip">—</span>;
+  if (!treatment) return <span className="tx-chip">n/a</span>;
   const key = treatment.modality;
   const injected = key === "insulin_only" || key === "insulin_plus_oral";
   const oral = key === "oral_only" || key === "insulin_plus_oral";

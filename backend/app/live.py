@@ -1,6 +1,6 @@
 """Staff-only live monitor: accelerated-time synthetic data and aggregate review-state trends.
 
-Synthetic data — demonstration only. The simulator writes fictional HbA1c/FPG
+Synthetic data · demonstration only. The simulator writes fictional HbA1c/FPG
 observations, then runs the normal Sync -> Analyse -> Route scan so every
 displayed state comes from the existing deterministic review tree. It never
 diagnoses, prescribes, classifies urgency or contacts anyone.
@@ -506,7 +506,7 @@ def build_dashboard(db: Session, user: User, points: int = 72) -> dict:
 
     current = _by_status(current_rows)
     return {
-        "data_label": "Synthetic data — demonstration only",
+        "data_label": "Synthetic data · demonstration only",
         "time_label": "Simulated time (accelerated)" if run else "No simulation run",
         "scope": {"organization": organization.name if organization else "All hospitals", "role": user.role},
         "statuses": STATUSES,

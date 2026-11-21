@@ -113,7 +113,7 @@ def sglt2_care_gaps(db: Session, organisation_id: str | None, limit: int = 20) -
                          "care_setting": patient.care_setting, **result})
     rows.sort(key=lambda row: (LISTED_STATES.index(row["state"]), row["patient_reference"]))
     return {
-        "data_label": "Synthetic data — demonstration only",
+        "data_label": "Synthetic data · demonstration only",
         "rule_version": RULES["version"],
         "references": RULES["references"],
         "scope": "organisation" if organisation_id else "system",

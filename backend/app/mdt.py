@@ -48,7 +48,7 @@ def run_three_member_mdt(db: Session, patient: Patient) -> dict:
         "boundary": "No referral is ordered, sent, or escalated outside the clinician review queue.",
     }
     return {
-        "label": "Synthetic data — demonstration only",
+        "label": "Synthetic data · demonstration only",
         "members": [evidence_member, complexity_member, coordinator_member],
         "draft_clinician_review_plan": ["Verify evidence and missing context.", "Use local policy and professional judgement to decide any care pathway.", "Attest to a selected consideration only after human review."],
         "requires_clinician_attestation": True,

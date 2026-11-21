@@ -26,7 +26,7 @@ settings = get_settings()
 mcp = FastMCP(
     "Sentinel Network",
     instructions=(
-        "Synthetic data — demonstration only. Read-only tools require an administrator-approved key. "
+        "Synthetic data · demonstration only. Read-only tools require an administrator-approved key. "
         "Clinicians are limited to their own organisation. CAIO access is system-wide only for the synthetic demo. "
         "No tool diagnoses, prescribes, triages, refers, contacts patients, changes data, or performs infrastructure actions."
     ),
@@ -125,7 +125,7 @@ def patient_summary(patient: Patient, db) -> dict:
         "care_setting": patient.care_setting,
         "age_group": patient.age_group,
         "pregnancy_related": patient.pregnancy_related,
-        "data_label": "Synthetic data — demonstration only",
+        "data_label": "Synthetic data · demonstration only",
         "review_notice": "Clinician review requested; no diagnosis, treatment instruction, urgency classification, or referral order.",
         "observations_truncated": len(observations) > 100,
         "observations": [
@@ -179,7 +179,7 @@ def service_status() -> dict:
         "service": "Sentinel Network",
         "status": "available",
         "mode": "read_only",
-        "data_label": "Synthetic data — demonstration only",
+        "data_label": "Synthetic data · demonstration only",
         "scheduler_mode": getattr(get_settings(), "scheduler_mode", "local_apscheduler"),
         "chain": batch.receipt_status if batch else "unavailable",
         "clinical_boundary": "Clinician review requested; no autonomous clinical action.",
@@ -208,7 +208,7 @@ def patient_reference_lookup(patient_reference: str) -> dict:
         if not patient:
             raise ValueError("No authorised synthetic patient matches that reference")
         return {
-            "data_label": "Synthetic data — demonstration only",
+            "data_label": "Synthetic data · demonstration only",
             "patient": {"id": patient.id, "reference": patient.reference, "care_setting": patient.care_setting, "age_group": patient.age_group},
             "notice": "One exact reference per request; this endpoint cannot list or export a patient cohort.",
         }
@@ -236,7 +236,7 @@ def patient_review_evidence(patient_id: str) -> dict:
         reviews = list(db.scalars(select(MdtReview).where(MdtReview.patient_id == patient.id).order_by(MdtReview.created_at.desc())).all())
         return {
             "patient_id": patient.id,
-            "data_label": "Synthetic data — demonstration only",
+            "data_label": "Synthetic data · demonstration only",
             "guideline_assessment": assessment(patient, observations),
             "findings": [{"id": item.id, "rule_id": item.rule_id, "rule_version": item.rule_version, "category": item.category, "status": item.status, "evidence": item.evidence, "created_at": item.created_at.isoformat()} for item in findings],
             "alerts": [{"id": item.id, "status": item.status, "acknowledged_at": item.acknowledged_at.isoformat() if item.acknowledged_at else None, "resolved_at": item.resolved_at.isoformat() if item.resolved_at else None} for item in alerts],
@@ -267,7 +267,7 @@ def review_queue(limit: int = 10) -> dict:
                 "patient_reference": patient.reference if patient else None,
                 "finding": {"id": finding.id, "rule_id": finding.rule_id, "category": finding.category, "status": finding.status, "created_at": finding.created_at.isoformat()} if finding else None,
             })
-        return {"data_label": "Synthetic data — demonstration only", "returned": len(rows), "maximum": 20, "alerts": rows, "notice": "Read-only review evidence; no acknowledgement, resolution, triage, referral or notification action is available through MCP."}
+        return {"data_label": "Synthetic data · demonstration only", "returned": len(rows), "maximum": 20, "alerts": rows, "notice": "Read-only review evidence; no acknowledgement, resolution, triage, referral or notification action is available through MCP."}
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False})
@@ -284,7 +284,7 @@ def terminology_catalogue() -> dict:
     with SessionLocal() as db:
         authorize(db, "status:read", "terminology_catalogue")
     return {
-        "data_label": "Synthetic data — demonstration only",
+        "data_label": "Synthetic data · demonstration only",
         "verified_on": CATALOGUE_VERIFIED_ON,
         "limitations": "Small verified demo subset only. Unknown or ambiguous codes require terminology review and cannot drive detection.",
         "loinc": [{"system": LOINC_SYSTEM, "version": LOINC_VERSION, "code": item.loinc_code, "display": item.display, "accepted_ucum": list(item.accepted_ucum), "canonical_ucum": item.canonical_ucum, "selection_basis": item.selection_basis, "method": item.method} for item in LAB_TERMS.values()],
@@ -301,8 +301,8 @@ def integrity_status() -> dict:
         authorize(db, "status:read", "integrity_status")
         batch = db.scalar(select(SourceBatch).order_by(SourceBatch.created_at.desc()))
         if not batch:
-            return {"data_label": "Synthetic data — demonstration only", "status": "not_seeded"}
-        return {"data_label": "Synthetic data — demonstration only", "batch_id": batch.id, "schema_version": batch.schema_version, "commitment": batch.commitment, "receipt_status": batch.receipt_status, "chain_id": batch.chain_id, "transaction_hash": batch.transaction_hash, "block_number": batch.block_number, "notice": "Commitment metadata is not proof of clinical truth and MCP cannot anchor, tamper, restore, or revoke grants."}
+            return {"data_label": "Synthetic data · demonstration only", "status": "not_seeded"}
+        return {"data_label": "Synthetic data · demonstration only", "batch_id": batch.id, "schema_version": batch.schema_version, "commitment": batch.commitment, "receipt_status": batch.receipt_status, "chain_id": batch.chain_id, "transaction_hash": batch.transaction_hash, "block_number": batch.block_number, "notice": "Commitment metadata is not proof of clinical truth and MCP cannot anchor, tamper, restore, or revoke grants."}
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False})
@@ -327,7 +327,7 @@ def mcp_activity() -> dict:
     """Read aggregate external-agent activity only. Requires CAIO governance:read; no identities, tokens or patient records are returned."""
     with SessionLocal() as db:
         authorize(db, "governance:read", "mcp_activity")
-        return {"data_label": "Synthetic data — demonstration only", **mcp_activity_summary(db)}
+        return {"data_label": "Synthetic data · demonstration only", **mcp_activity_summary(db)}
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False})
@@ -355,7 +355,7 @@ def regional_aggregate() -> dict:
                 rows.append({"district": organisation.district, "suppressed": True})
             else:
                 rows.append({"district": organisation.district, "eligible_patients": eligible, "review_evidence_patients": numerator, "anomaly_rate_among_monitored_patients": round(numerator / eligible * 100, 1), "suppressed": False})
-        return {"availability": "available", "data_label": "Synthetic data — demonstration only", "metric": "Anomaly rate among monitored patients", "cohort_definition": "Unique synthetic patients with sufficient valid observations for the stated demo rule.", "rows": rows, "integrity": integrity}
+        return {"availability": "available", "data_label": "Synthetic data · demonstration only", "metric": "Anomaly rate among monitored patients", "cohort_definition": "Unique synthetic patients with sufficient valid observations for the stated demo rule.", "rows": rows, "integrity": integrity}
 
 
 class KeyProtectedMCP:

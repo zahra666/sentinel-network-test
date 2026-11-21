@@ -229,7 +229,7 @@ def build_governance_dashboard(db: Session) -> dict:
             "status": data_status,
             "summary": "Synthetic observations retain source, version, timing, and unit evidence; incompatible units are rejected from comparison.",
             "evidence": [
-                {"label": "Data classification", "value": "Synthetic data — demonstration only"},
+                {"label": "Data classification", "value": "Synthetic data · demonstration only"},
                 {"label": "Latest source batch", "value": source_batch_state},
             ],
         },
@@ -280,12 +280,12 @@ def build_governance_dashboard(db: Session) -> dict:
     ]
 
     return {
-        "data_label": "Synthetic data — demonstration only",
+        "data_label": "Synthetic data · demonstration only",
         "governance_version": GOVERNANCE_VERSION,
         "framework": {
             "primary": "ISO/IEC 42001:2023",
             "lifecycle_companion": "ISO/IEC 5338:2023",
-            "claim": "MVP alignment demonstrator — not ISO certified or a full compliance claim.",
+            "claim": "MVP alignment demonstrator, not ISO certified or a full compliance claim.",
         },
         "system_profile": {
             "system_name": "Goola",

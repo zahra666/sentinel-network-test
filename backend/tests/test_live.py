@@ -44,7 +44,7 @@ def test_dashboard_without_run_uses_live_assessment():
         assert data["current"]["total"] == 100
         assert data["series"] == []
         assert data["simulation"]["can_control"] is True
-        assert data["data_label"] == "Synthetic data — demonstration only"
+        assert data["data_label"] == "Synthetic data · demonstration only"
 
 
 def test_simulation_writes_through_normal_scan_and_scopes_clinicians():

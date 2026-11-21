@@ -131,7 +131,7 @@ export default function DemoStage({ token, onExit }: { token: string, onExit: ()
           {lines.map((line) => <TermLine key={line.id} line={line} />)}
           <div className="demo-cursor">▍</div>
         </div>
-        <div className="demo-term-foot">Synthetic data — demonstration only · Sync → Analyse → Route</div>
+        <div className="demo-term-foot">Synthetic data · demonstration only · Sync → Analyse → Route</div>
       </section>
       <section className="demo-board"><LiveMonitor key={monitorKey} token={token} compact hideControls tickSeconds={TICK_SECONDS} scenario={SCENARIO} /></section>
     </div>

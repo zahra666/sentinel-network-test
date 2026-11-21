@@ -15,7 +15,7 @@ from .db import get_db
 from .models import AgentAccessKey, AuditEvent, User
 from .security import require_roles
 
-router = APIRouter(prefix="/api/mcp/keys", tags=["MCP access — administrator approval"])
+router = APIRouter(prefix="/api/mcp/keys", tags=["MCP access: administrator approval"])
 admin_only = require_roles("administrator")
 
 MCP_SCOPES = {
@@ -42,7 +42,7 @@ def key_metadata(key: AgentAccessKey) -> dict:
     return {"id": key.id, "name": key.name, "purpose": key.purpose, "user_id": key.user_id,
             "approved_by": key.approved_by, "scopes": key.scopes, "patient_ids": key.patient_ids,
             "expires_at": utc(key.expires_at).isoformat(), "revoked": key.revoked_at is not None,
-            "data_label": "Synthetic data — demonstration only"}
+            "data_label": "Synthetic data · demonstration only"}
 
 
 def valid_key(db: Session, key: AgentAccessKey | None) -> User:
