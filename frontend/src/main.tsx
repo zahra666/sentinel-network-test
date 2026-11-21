@@ -20,11 +20,12 @@ import "./styles.css";
 
 const API = import.meta.env.VITE_API_BASE_URL || "/api";
 type RecordValue = Record<string, any>;
-type PatientTab = "renal" | "outreach" | "therapy";
+type PatientTab = "case" | "renal" | "therapy" | "outreach";
 const PATIENT_TABS: { id: PatientTab, label: string }[] = [
-  { id: "renal", label: "Renal profile" },
+  { id: "case", label: "Patient" },
+  { id: "renal", label: "Renal Profile" },
+  { id: "therapy", label: "Glucose-Lowering Therapy" },
   { id: "outreach", label: "Outreach" },
-  { id: "therapy", label: "Glucose-lowering therapy" },
 ];
 
 async function api(path: string, token?: string, options: RequestInit = {}) {
@@ -214,7 +215,7 @@ function Patients({ patients, token }: { patients: RecordValue[], token: string 
   const [renal, setRenal] = useState<RecordValue | null>(null);
   const [therapy, setTherapy] = useState<RecordValue | null>(null);
   const [cohort, setCohort] = useState<RecordValue | null>(null);
-  const [activeTab, setActiveTab] = useState<PatientTab>("renal");
+  const [activeTab, setActiveTab] = useState<PatientTab>("case");
   const [patientError, setPatientError] = useState("");
   const patientRequest = useRef(0);
   useEffect(() => { api("/treatment/summary", token).then(setTherapy).catch(() => setTherapy(null)); api("/cohort/summary", token).then(setCohort).catch(() => setCohort(null)); }, [token, patients.length]);
@@ -228,7 +229,7 @@ function Patients({ patients, token }: { patients: RecordValue[], token: string 
     } catch (err: any) { if (request === patientRequest.current) setPatientError(err.message); }
   }, [token]);
   useEffect(() => {
-    if (!selected && patients.length) void choose(patients.find((patient) => patient.reference === "SYN-DM-003") || patients[0]);
+    if (!selected && patients.length) void choose(patients.find((patient) => patient.reference === "SYN-DM-007") || patients[0]);
   }, [choose, patients, selected]);
   const shown = useMemo(() => { const q = query.trim().toLowerCase(); return q ? patients.filter((p) => `${p.reference} ${p.care_setting} ${p.organization}`.toLowerCase().includes(q)) : patients; }, [patients, query]);
   const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -251,15 +252,15 @@ function Patients({ patients, token }: { patients: RecordValue[], token: string 
           <td><Badge tone={patient.pregnancy_related ? "warning" : "neutral"}>{patient.pregnancy_related ? "Scope check" : "In scope"}</Badge></td></tr>)}
       </tbody></table></div>
     </Card>
-    <Card title={selected?.reference || "Patient record"} subtitle={detail ? `${detail.care_setting} · ${detail.organization || ""}${detail.sex ? ` · ${detail.sex === "female" ? "Female" : "Male"}, ${detail.age_group}` : ""}${detail.body_mass_index ? ` · BMI ${detail.body_mass_index}` : ""}` : "Authorised patient detail"} actions={detail ? <Badge tone={toneFor(detail.guideline_assessment.status)}>{human(detail.guideline_assessment.status)}</Badge> : undefined} flush className="patients-primary patient-detail-card">
+    <Card title="Patient workspace" flush className="patients-primary patient-detail-card">
       {detail ? <div className="patient-detail-body">
-        <PatientEvidence detail={detail} />
         <div className="patient-tabs">
           <div className="patient-tab-list" role="tablist" aria-label="Patient details">
-            {PATIENT_TABS.map((tab) => <button key={tab.id} id={`patients-tab-${tab.id}`} type="button" role="tab" aria-selected={activeTab === tab.id} aria-controls={`patients-panel-${tab.id}`} tabIndex={activeTab === tab.id ? 0 : -1} className={activeTab === tab.id ? "patient-tab active" : "patient-tab"} onClick={() => setActiveTab(tab.id)} onKeyDown={handleTabKeyDown}>{tab.label}</button>)}
+            {PATIENT_TABS.map((tab) => <button key={tab.id} id={`patients-tab-${tab.id}`} type="button" role="tab" aria-selected={activeTab === tab.id} aria-controls={`patients-panel-${tab.id}`} tabIndex={activeTab === tab.id ? 0 : -1} className={activeTab === tab.id ? "patient-tab active" : "patient-tab"} onClick={() => setActiveTab(tab.id)} onKeyDown={handleTabKeyDown}>{tab.id === "case" ? selected?.reference || tab.label : tab.label}</button>)}
           </div>
           <div id={`patients-panel-${activeTab}`} className="patient-tab-panel" role="tabpanel" aria-labelledby={`patients-tab-${activeTab}`} tabIndex={0}>
-            {activeTab === "renal" ? renal ? <RenalProfile profile={renal} /> : <div className="renal-empty">No renal profile results for this record.</div>
+            {activeTab === "case" ? <PatientEvidence detail={detail} />
+              : activeTab === "renal" ? renal ? <RenalProfile profile={renal} /> : <div className="renal-empty">No renal profile results for this record.</div>
               : activeTab === "outreach" ? <PatientOutreach patientId={detail.id} token={token} />
                 : <>
                   <TherapyList treatment={detail.treatment} />
@@ -285,6 +286,10 @@ const TEST_LABELS: Record<string, string> = { hba1c: "HbA1c", fpg: "Fasting gluc
 function PatientEvidence({ detail }: { detail: RecordValue }) {
   const hba1c: number[] = detail.observations.filter((o: RecordValue) => o.code === "hba1c" && o.normalised_value != null).sort((x: RecordValue, y: RecordValue) => +new Date(x.observed_at) - +new Date(y.observed_at)).map((o: RecordValue) => o.normalised_value);
   return <div className="patient-case-summary">
+    <div className="case-summary-meta">
+      <div><strong>{detail.reference}</strong><span>{detail.care_setting} · {detail.organization || ""}{detail.sex ? ` · ${detail.sex === "female" ? "Female" : "Male"}, ${detail.age_group}` : ""}{detail.body_mass_index ? ` · BMI ${detail.body_mass_index}` : ""}</span></div>
+      <Badge tone={toneFor(detail.guideline_assessment.status)}>{human(detail.guideline_assessment.status)}</Badge>
+    </div>
     <div className="case-summary-head"><span>Case summary</span>{hba1c.length > 1 && <span className="spark-wrap"><small>HbA1c</small><Sparkline values={hba1c} width={96} height={30} /></span>}</div>
     <table className="table compact"><thead><tr><th>Test</th><th className="num">Result</th><th>Date</th><th>Code</th></tr></thead><tbody>
       {detail.observations.map((observation: RecordValue) => <tr key={observation.id}>
