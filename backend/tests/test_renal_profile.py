@@ -64,15 +64,14 @@ def test_seed_panels_keep_latest_egfr_and_are_internally_consistent():
         final = synthetic_egfr(index)
         panels = synthetic_renal_panels(index, "45-64", final)
         assert len(panels) == 3
-        assert all(code != "egfr" for code, *_ in panels[-1])  # latest eGFR is the seed's existing record
+        assert [code for code, *_ in panels[-1]] == ["sodium", "potassium", "chloride", "creatinine", "urea", "uric_acid"]  # latest eGFR is the seed's existing record
         for panel in panels[:-1]:
-            codes = [code for code, *_ in panel]
-            assert codes == (["sodium", "potassium", "chloride", "urea", "uric_acid"] if final is None else ["sodium", "potassium", "chloride", "creatinine", "urea", "uric_acid", "egfr"])
-            if final is not None:
-                # Earlier visits never look better than the latest beyond a small measurement wobble.
-                assert dict((c, v) for c, v, *_ in panel)["egfr"] >= final - 1.5
+            assert [code for code, *_ in panel] == ["sodium", "potassium", "chloride", "creatinine", "urea", "uric_acid", "egfr"]
+            # Earlier visits never look better than the latest beyond a small measurement wobble.
+            assert dict((c, v) for c, v, *_ in panel)["egfr"] >= final - 1.5
         assert all(isinstance(value, float) for panel in panels for _, value, *_ in panel)  # integrity hashes need stable floats
-    assert synthetic_renal_panels(9, "18-44", None)[0][0][0] == "sodium"
+    # A FHIR-imported record without eGFR still yields the five other analytes rather than failing.
+    assert [code for code, *_ in synthetic_renal_panels(9, "18-44", None)[0]] == ["sodium", "potassium", "chloride", "urea", "uric_acid"]
 
 
 def test_flags_and_categories_are_display_only():
@@ -148,3 +147,33 @@ def test_renal_observations_do_not_change_cpg_review_inputs(cohort):
         result = assessment(patient, list(patient.observations))
     assert result["status"] != "data_quality_review"  # verified renal terms are not treated as unmapped data
     assert result["nodes"][0]["state"] == "valid"
+
+
+def test_every_seeded_patient_has_a_complete_renal_profile():
+    """All profiles (500 in the demo) carry 7 analytes x 3 visits, all verified."""
+    import tempfile
+    from sqlalchemy import create_engine as _ce, select as _select
+    from sqlalchemy.orm import sessionmaker as _sm
+    from app import seed as seed_module
+    from app.config import get_settings
+
+    engine = _ce(f"sqlite:///{tempfile.mkdtemp()}/renal.db")
+    Base.metadata.create_all(engine)
+    factory = _sm(bind=engine, expire_on_commit=False)
+    original = (seed_module.SessionLocal, seed_module.initialise_database, get_settings().seed_patient_count)
+    seed_module.SessionLocal, seed_module.initialise_database = factory, (lambda: None)
+    get_settings().seed_patient_count = 500
+    try:
+        seed_module.seed()
+        with factory() as db:
+            patients = list(db.scalars(_select(Patient)).all())
+            assert len(patients) == 500
+            for patient in patients:
+                profile = renal_profile(patient.observations)
+                assert len(profile["panel_dates"]) == 3, patient.reference
+                for analyte in profile["analytes"]:
+                    assert len(analyte["series"]) == 3 and all(p["value"] is not None for p in analyte["series"]), (patient.reference, analyte["code"])
+    finally:
+        seed_module.SessionLocal, seed_module.initialise_database = original[0], original[1]
+        get_settings().seed_patient_count = original[2]
+        engine.dispose()

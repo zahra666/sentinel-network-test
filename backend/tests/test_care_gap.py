@@ -195,7 +195,7 @@ def test_mcp_tool_uses_clinical_boundary(cohort, monkeypatch):
 
 
 def test_seed_generators_cover_review_fixtures():
-    assert synthetic_egfr(9) is None and synthetic_egfr(49) == 17.0
+    assert all(synthetic_egfr(i) is not None for i in range(1, 501)) and synthetic_egfr(49) == 17.0  # every profile has an eGFR
     assert all(20 <= synthetic_egfr(i) < 60 for i in range(6, 600, 6) if i % 100 not in {9, 49})
     assert synthetic_ascvd_code(5) and synthetic_ascvd_code(7) is None
     stopped = synthetic_medications(35, "p", 70.0, True)

@@ -136,7 +136,7 @@ Every seeded patient has a glucose-lowering regimen: oral glucose-lowering drugs
 
 ## Synthetic renal profile (U&E panel)
 
-Each seeded patient gets a renal profile at three visits (about 12 months, 6 months and 8 days before the anchor date): sodium, potassium, chloride, creatinine, urea, uric acid and eGFR — the same seven analytes as a Malaysian hospital "Renal Profile" report.
+Every seeded patient (all 500 in the demo) gets a complete renal profile at three visits (about 12 months, 6 months and 8 days before the anchor date): sodium, potassium, chloride, creatinine, urea, uric acid and eGFR — the same seven analytes as a Malaysian hospital "Renal Profile" report.
 
 - **Consistent values**: creatinine is back-calculated from the patient's existing CKD-EPI eGFR using the CKD-EPI 2021 equation and an assumed synthetic age/sex (recorded in each observation's provenance). Earlier visits have a slightly higher eGFR (faster decline when eGFR < 60). Potassium, urea and uric acid rise as eGFR falls. A few deterministic profiles show high chloride or uric acid.
 - **Existing logic unchanged**: the latest eGFR is the same record as before, so the CPG review and the SGLT2 care-gap list give identical results. New analytes are verified LOINC terms that do not feed any detection rule.

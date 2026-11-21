@@ -42,10 +42,13 @@ def care_matrix_for(total: int) -> list[tuple[int, str, int]]:
     return [(org, setting, count) for (org, setting, _), count in zip(BASE_CARE_MATRIX, counts)]
 
 
-def synthetic_egfr(index: int) -> float | None:
-    """Deterministic CKD-EPI eGFR spread: mostly preserved, ~1 in 6 below 60, one below 20 per 100."""
-    if index % 100 == 9:
-        return None  # deliberate missing-eGFR fixture
+def synthetic_egfr(index: int) -> float:
+    """Deterministic CKD-EPI eGFR spread: mostly preserved, ~1 in 6 below 60, one below 20 per 100.
+
+    Every profile has an eGFR so that all patients carry a complete seven-analyte
+    renal profile. (The former missing-eGFR fixture at index % 100 == 9 was retired;
+    the care-gap "insufficient evidence" state remains covered by unit tests.)
+    """
     if index % 100 == 49:
         return 17.0  # below the guideline SGLT2-inhibitor initiation threshold
     if index % 6 == 0:
