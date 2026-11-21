@@ -13,7 +13,7 @@ from typing import Any
 LOINC_SYSTEM = "http://loinc.org"
 UCUM_SYSTEM = "http://unitsofmeasure.org"
 SNOMED_SYSTEM = "http://snomed.info/sct"
-VERIFIED_UCUM_CODES = {"%", "mmol/mol", "mmol/L", "mg/dL", "mL/min/{1.73_m2}"}
+VERIFIED_UCUM_CODES = {"%", "mmol/mol", "mmol/L", "umol/L", "mg/dL", "mL/min/{1.73_m2}"}
 
 # Verified 2026-11-05 against the linked official resources in README.
 LOINC_VERSION = "2.83"
@@ -53,6 +53,32 @@ LAB_TERMS: dict[str, LabTerm] = {
         "2160-0", "Creatinine [Mass/volume] in Serum or Plasma", "creatinine", ("mg/dL",), "mg/dL",
         "Serum/plasma, mass-concentration, point-in-time creatinine.",
     ),
+    # Renal profile subset, verified 2026-11-21 against loinc.org term pages
+    # (long common name, SCnc / Ser-Plas / Qn axes and example UCUM unit).
+    "2951-2": LabTerm(
+        "2951-2", "Sodium [Moles/volume] in Serum or Plasma", "sodium", ("mmol/L",), "mmol/L",
+        "Serum/plasma, substance-concentration, point-in-time sodium.",
+    ),
+    "2823-3": LabTerm(
+        "2823-3", "Potassium [Moles/volume] in Serum or Plasma", "potassium", ("mmol/L",), "mmol/L",
+        "Serum/plasma, substance-concentration, point-in-time potassium.",
+    ),
+    "2075-0": LabTerm(
+        "2075-0", "Chloride [Moles/volume] in Serum or Plasma", "chloride", ("mmol/L",), "mmol/L",
+        "Serum/plasma, substance-concentration, point-in-time chloride.",
+    ),
+    "14682-9": LabTerm(
+        "14682-9", "Creatinine [Moles/volume] in Serum or Plasma", "creatinine_molar", ("umol/L",), "umol/L",
+        "Serum/plasma, substance-concentration creatinine (SI reporting used by Malaysian laboratories); kept distinct from mass-concentration 2160-0.",
+    ),
+    "22664-7": LabTerm(
+        "22664-7", "Urea [Moles/volume] in Serum or Plasma", "urea", ("mmol/L",), "mmol/L",
+        "Serum/plasma, substance-concentration urea (not urea nitrogen).",
+    ),
+    "14933-6": LabTerm(
+        "14933-6", "Urate [Moles/volume] in Serum or Plasma", "urate", ("umol/L",), "umol/L",
+        "Serum/plasma, substance-concentration urate (reported as uric acid).",
+    ),
     "62238-1": LabTerm(
         "62238-1", "Glomerular filtration rate [Volume Rate/Area] in Serum, Plasma or Blood by Creatinine-based formula (CKD-EPI)/1.73 sq M", "egfr_ckd_epi", ("mL/min/{1.73_m2}",), "mL/min/{1.73_m2}",
         "Serum/plasma/blood, volume-rate/area, CKD-EPI creatinine-based formula; equation remains part of the meaning.",
@@ -74,7 +100,22 @@ LOCAL_TEST_CONTEXT: dict[str, str] = {
     "egfr": "egfr_ckd_epi",
     "egfr_ckd_epi": "egfr_ckd_epi",
     "creatinine": "creatinine",
+    "creat_umol": "creatinine_molar",
+    "creatinine_umol": "creatinine_molar",
+    "na": "sodium",
+    "sodium": "sodium",
+    "k": "potassium",
+    "potassium": "potassium",
+    "cl": "chloride",
+    "chloride": "chloride",
+    "urea": "urea",
+    "uric_acid": "urate",
+    "urate": "urate",
 }
+
+# Single-analyte quantitative renal-profile terms: code semantics alone fix the
+# meaning, so a conflicting local context is the only ambiguity to flag.
+RENAL_PROFILE_KINDS = frozenset({"sodium", "potassium", "chloride", "creatinine_molar", "urea", "urate"})
 
 SNOMED_CONDITIONS: dict[str, dict[str, str | None]] = {
     "44054006": {
@@ -147,7 +188,7 @@ def clinical_key(term: LabTerm | None, original_code: str | None) -> tuple[str |
     if not term:
         return None, "needs_terminology_review"
     local_context = LOCAL_TEST_CONTEXT.get((original_code or "").strip().lower())
-    if term.value_kind in {"hba1c_ngsp", "hba1c_ifcc", "egfr_ckd_epi", "creatinine"}:
+    if term.value_kind in {"hba1c_ngsp", "hba1c_ifcc", "egfr_ckd_epi", "creatinine"} | RENAL_PROFILE_KINDS:
         if local_context and local_context != term.value_kind:
             return None, "ambiguous_local_mapping"
         return term.value_kind, "verified"
@@ -223,6 +264,12 @@ def compatible_for_rule(item: Any, clinical_key: str) -> bool:
         "fpg": "mmol/L",
         "rpg": "mmol/L",
         "egfr_ckd_epi": "mL/min/{1.73_m2}",
+        "sodium": "mmol/L",
+        "potassium": "mmol/L",
+        "chloride": "mmol/L",
+        "creatinine_molar": "umol/L",
+        "urea": "mmol/L",
+        "urate": "umol/L",
     }
     return (
         getattr(item, "clinical_key", None) == clinical_key

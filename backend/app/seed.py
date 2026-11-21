@@ -9,6 +9,7 @@ from .config import get_settings
 from .db import SessionLocal, initialise_database
 from .models import AuditEvent, Condition, MedicationStatement, Observation, Organization, Patient, ResearchGrant, SourceBatch, User
 from .security import hash_password, verify_password
+from .renal_profile import seed_codes, synthetic_renal_panels, synthetic_sex_is_female
 from .terminology import ATC_MEDICATIONS, ATC_SYSTEM, LOINC_SYSTEM, LOINC_VERSION, SNOMED_CONDITIONS, SNOMED_SYSTEM, TerminologyError, map_measurement
 
 PASSWORD = "12345"
@@ -167,6 +168,10 @@ def seed() -> None:
             egfr = synthetic_egfr(index)
             if egfr is not None:
                 values.append(("egfr", egfr, "mL/min/{1.73_m2}", 8))
+            # Synthetic renal profile (Na, K, Cl, creatinine, urea, uric acid, eGFR)
+            # at three visits; the latest eGFR above is reused, not duplicated.
+            for panel in synthetic_renal_panels(index, patient.age_group, egfr):
+                values.extend(panel)
             conditions.append(Condition(
                 patient_id=patient.id, source_id=f"COND-{index:03d}", version=1,
                 clinical_status="active", verification_status="confirmed",
@@ -192,7 +197,7 @@ def seed() -> None:
                     "hba1c": ("4548-4", "HBA1C"),
                     "fpg": ("14749-6", "FPG"),
                     "egfr": ("62238-1", "EGFR_CKD_EPI"),
-                }[code]
+                }.get(code) or seed_codes(code)
                 try:
                     mapping = map_measurement(
                         system=LOINC_SYSTEM, code=loinc_code, display=None, version=LOINC_VERSION,
@@ -209,15 +214,18 @@ def seed() -> None:
                         "normalised_ucum_unit": None,
                         "conversion_provenance": {"reason": "deliberate synthetic incompatible-unit fixture"},
                     }
+                renal_extra = ({"renal_profile": True, "creatinine_back_calculated": "CKD-EPI 2021",
+                                "assumed_sex": "female" if synthetic_sex_is_female(index) else "male"} if code == "creatinine" else
+                               {"renal_profile": True} if loinc_code not in {"4548-4", "14749-6"} else {})
                 observations.append(Observation(
-                    patient_id=patient.id, code=code, value=value, unit=item_unit,
+                    patient_id=patient.id, code=(mapping["clinical_key"] if code not in {"hba1c", "fpg", "egfr"} and mapping["clinical_key"] else code), value=value, unit=item_unit,
                     observed_at=ANCHOR - timedelta(days=days_ago),
                     ingested_at=ANCHOR - timedelta(days=max(days_ago - 1, 0)),
                     source_id=f"SRC-{index:03d}-{sequence}", version=1,
                     is_late_arrival=index % 100 == 13 and sequence == 1,
                     ucum_unit=item_unit, result_status="final", method=("CKD-EPI creatinine-based formula / 1.73 sq M" if code == "egfr" else None),
                     egfr_equation=("CKD-EPI" if code == "egfr" else None),
-                    provenance={"source": "deterministic synthetic seed", "synthetic_only": True, **mapping["conversion_provenance"]},
+                    provenance={"source": "deterministic synthetic seed", "synthetic_only": True, **renal_extra, **mapping["conversion_provenance"]},
                     **{key: mapping[key] for key in ("original_code", "coding_system", "standard_code", "coding_display", "terminology_version", "clinical_key", "terminology_status", "normalised_value", "normalised_ucum_unit")},
                 ))
         db.add_all(conditions)

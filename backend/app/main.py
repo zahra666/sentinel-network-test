@@ -11,6 +11,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .renal_profile import renal_profile
 from .care_gap import care_gaps_for_user
 from .agent import chat, enqueue_task, process_pending_tasks, process_task
 from .chain import ChainUnavailable, anchor_batch, anchor_research_grant, revoke_research_grant, verify_batch, verify_research_grant
@@ -187,6 +188,14 @@ def patient_detail(patient_id: str, user: User = Depends(require_roles("administ
     return {**serialize_patient(patient, db), "observations": [serialize_observation(item) for item in observations],
             "conditions": [serialize_condition(item) for item in conditions], "diagnostic_reports": [serialize_diagnostic_report(item) for item in reports],
             "guideline_assessment": assessment(patient, observations)}
+
+
+@app.get("/api/patients/{patient_id}/renal-profile")
+def patient_renal_profile(patient_id: str, user: User = Depends(require_roles("administrator", "clinician")), db: Session = Depends(get_db)) -> dict:
+    """Seven-analyte renal profile series for charting (synthetic; display flags only)."""
+    patient = authorised_patient(patient_id, user, db)
+    observations = list(db.scalars(select(Observation).where(Observation.patient_id == patient.id).order_by(Observation.observed_at)).all())
+    return {"patient_id": patient.id, "reference": patient.reference, **renal_profile(observations)}
 
 
 @app.get("/api/fhir/r4/Patient/{patient_id}", response_class=FhirR4JsonResponse)

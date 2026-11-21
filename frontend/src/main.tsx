@@ -13,6 +13,7 @@ import goolaLoop from "./assets/goola-loop.mp4";
 import LiveMonitor from "./LiveMonitor";
 import DemoStage from "./DemoStage";
 import OutreachPage, { PatientOutreach } from "./Outreach";
+import { RenalProfile } from "./RenalProfile";
 import { Badge, Card, CountUp, Empty, Ring, Sparkline, STATUS_COLORS, Stat, human, toneFor } from "./ui";
 import "./styles.css";
 
@@ -203,7 +204,12 @@ function Overview({ data, token }: { data: RecordValue | null, token: string }) 
 
 function Patients({ patients, token }: { patients: RecordValue[], token: string }) {
   const [selected, setSelected] = useState<RecordValue | null>(null); const [detail, setDetail] = useState<RecordValue | null>(null); const [query, setQuery] = useState("");
-  const choose = async (patient: RecordValue) => { setSelected(patient); setDetail(null); setDetail(await api(`/patients/${patient.id}`, token)); };
+  const [renal, setRenal] = useState<RecordValue | null>(null);
+  const choose = async (patient: RecordValue) => {
+    setSelected(patient); setDetail(null); setRenal(null);
+    const [record, profile] = await Promise.all([api(`/patients/${patient.id}`, token), api(`/patients/${patient.id}/renal-profile`, token).catch(() => null)]);
+    setDetail(record); setRenal(profile);
+  };
   const shown = useMemo(() => { const q = query.trim().toLowerCase(); return q ? patients.filter((p) => `${p.reference} ${p.care_setting} ${p.organization}`.toLowerCase().includes(q)) : patients; }, [patients, query]);
   return <section className="master-detail">
     <Card title="Patients" count={patients.length} flush actions={<label className="search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" aria-label="Search patients" /></label>}>
@@ -215,12 +221,13 @@ function Patients({ patients, token }: { patients: RecordValue[], token: string 
     </Card>
     <div className="detail-column">
       {selected ? detail ? <PatientEvidence detail={detail} /> : <Card title={selected.reference}><div className="loading-line" /></Card> : <Card title="Patient record"><Empty title="Select a patient" text="Choose a profile to view results and review status." /></Card>}
+      {detail && renal && <Card title="Renal profile" subtitle="Na · K · Cl · Creatinine · Urea · Uric acid · eGFR" flush><RenalProfile profile={renal} /></Card>}
       {detail && <Card title="Outreach"><PatientOutreach patientId={detail.id} token={token} /></Card>}
     </div>
   </section>;
 }
 
-const TEST_LABELS: Record<string, string> = { hba1c: "HbA1c", fpg: "Fasting glucose", rpg: "Random glucose", egfr: "eGFR", creatinine: "Creatinine" };
+const TEST_LABELS: Record<string, string> = { hba1c: "HbA1c", fpg: "Fasting glucose", rpg: "Random glucose", egfr: "eGFR", creatinine: "Creatinine", creatinine_molar: "Creatinine", sodium: "Sodium", potassium: "Potassium", chloride: "Chloride", urea: "Urea", urate: "Uric acid" };
 
 function PatientEvidence({ detail }: { detail: RecordValue }) {
   const status = detail.guideline_assessment.status;
